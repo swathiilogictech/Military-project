@@ -1,43 +1,19 @@
 import 'package:flutter/material.dart';
 
+import 'database_service.dart';
+
 class DashboardPage extends StatelessWidget {
-  const DashboardPage({super.key});
+  const DashboardPage({
+    super.key,
+    required this.onOpenCadets,
+    required this.onOpenInventory,
+  });
+
+  final VoidCallback onOpenCadets;
+  final VoidCallback onOpenInventory;
 
   @override
   Widget build(BuildContext context) {
-    final statCards = <_StatCardData>[
-      const _StatCardData(
-        title: 'Number of\nCadets',
-        value: '5',
-        color: Color(0xFF88CF10),
-      ),
-      const _StatCardData(
-        title: 'Given Items',
-        value: '32',
-        color: Color(0xFFA77AEE),
-      ),
-      const _StatCardData(
-        title: 'Collected\nItems',
-        value: '17',
-        color: Color(0xFFB25294),
-      ),
-      const _StatCardData(
-        title: 'Batches',
-        value: '5',
-        color: Color(0xFF6FA7B3),
-      ),
-      const _StatCardData(
-        title: 'Boxes',
-        value: '25',
-        color: Color(0xFFC44C62),
-      ),
-      const _StatCardData(
-        title: 'Items',
-        value: '90',
-        color: Color(0xFFB27431),
-      ),
-    ];
-
     final transfers = <_TransferData>[
       const _TransferData(
         name: 'Daniel',
@@ -65,14 +41,12 @@ class DashboardPage extends StatelessWidget {
       ),
     ];
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8F7F5),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
               const Center(
                 child: Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
@@ -102,19 +76,67 @@ class DashboardPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 22),
-              GridView.builder(
-                shrinkWrap: true,
-                itemCount: statCards.length,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 18,
-                  childAspectRatio: 0.95,
-                ),
-                itemBuilder: (context, index) {
-                  final card = statCards[index];
-                  return _StatCard(data: card);
+              FutureBuilder<DashboardCounts>(
+                future: DatabaseService.instance.getDashboardCounts(),
+                builder: (context, snapshot) {
+                  final counts = snapshot.data;
+                  final statCards = <_StatCardData>[
+                    _StatCardData(
+                      title: 'Number of\nCadets',
+                      value: '${counts?.cadets ?? 0}',
+                      color: const Color(0xFF88CF10),
+                    ),
+                    _StatCardData(
+                      title: 'Given Items',
+                      value: '${counts?.givenItems ?? 0}',
+                      color: const Color(0xFFA77AEE),
+                    ),
+                    _StatCardData(
+                      title: 'Collected\nItems',
+                      value: '${counts?.collectedItems ?? 0}',
+                      color: const Color(0xFFB25294),
+                    ),
+                    _StatCardData(
+                      title: 'Batches',
+                      value: '${counts?.batches ?? 0}',
+                      color: const Color(0xFF6FA7B3),
+                    ),
+                    _StatCardData(
+                      title: 'Boxes',
+                      value: '${counts?.boxes ?? 0}',
+                      color: const Color(0xFFC44C62),
+                    ),
+                    _StatCardData(
+                      title: 'Items',
+                      value: '${counts?.itemQuantity ?? 0}',
+                      color: const Color(0xFFB27431),
+                    ),
+                  ];
+
+                  return GridView.builder(
+                    shrinkWrap: true,
+                    itemCount: statCards.length,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      crossAxisSpacing: 16,
+                      mainAxisSpacing: 18,
+                      childAspectRatio: 0.95,
+                    ),
+                    itemBuilder: (context, index) {
+                      VoidCallback? onTap;
+                      if (index == 0) {
+                        onTap = onOpenCadets;
+                      } else if (index >= 3) {
+                        onTap = onOpenInventory;
+                      }
+
+                      return _StatCard(
+                        data: statCards[index],
+                        onTap: onTap,
+                      );
+                    },
+                  );
                 },
               ),
               const SizedBox(height: 14),
@@ -140,49 +162,18 @@ class DashboardPage extends StatelessWidget {
               const SizedBox(height: 10),
               _buildTableHeader(),
               const SizedBox(height: 8),
-              Expanded(
-                child: ListView.separated(
-                  itemCount: transfers.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    return _TransferCard(data: transfers[index]);
-                  },
-                ),
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: transfers.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  return _TransferCard(data: transfers[index]);
+                },
               ),
+              const SizedBox(height: 14),
             ],
           ),
-        ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        currentIndex: 0,
-        selectedItemColor: Colors.black,
-        unselectedItemColor: Colors.black,
-        showSelectedLabels: false,
-        showUnselectedLabels: false,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_filled),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.ios_share_outlined),
-            label: 'Share',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.shopping_cart_checkout_outlined),
-            label: 'Cart',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.folder_open_outlined),
-            label: 'Folder',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.logout),
-            label: 'Logout',
-          ),
-        ],
-      ),
     );
   }
 
@@ -214,48 +205,55 @@ class DashboardPage extends StatelessWidget {
 }
 
 class _StatCard extends StatelessWidget {
-  const _StatCard({required this.data});
+  const _StatCard({
+    required this.data,
+    this.onTap,
+  });
 
   final _StatCardData data;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: data.color,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x33000000),
-            blurRadius: 5,
-            offset: Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              data.title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              data.value,
-              style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: data.color,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x33000000),
+              blurRadius: 5,
+              offset: Offset(0, 4),
             ),
           ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                data.title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                data.value,
+                style: const TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -301,10 +299,7 @@ class _TransferCard extends StatelessWidget {
               children: [
                 Text(
                   data.name,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 18,
-                  ),
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
                 ),
                 Text(
                   data.id,
