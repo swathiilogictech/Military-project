@@ -435,6 +435,222 @@ class InventoryPageState extends State<InventoryPage> {
     }
   }
 
+  Future<void> _showEditItemDialog(ItemRecord item) async {
+    final formKey = GlobalKey<FormState>();
+    final nameController = TextEditingController(text: item.name);
+    final quantityController = TextEditingController(text: item.quantity.toString());
+
+    bool usePhoto = (item.imageData != null && item.imageData!.isNotEmpty) || item.imageKey == 'custom';
+    Uint8List? photoBytes;
+    String? photoBase64 = item.imageData;
+    String selectedImageKey = item.imageKey == 'custom' ? _iconChoices.first.$1 : item.imageKey;
+    final picker = ImagePicker();
+
+    if (photoBase64 != null && photoBase64.isNotEmpty) {
+      photoBytes = base64Decode(photoBase64);
+    }
+
+    final shouldSave = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit Item'),
+          content: StatefulBuilder(
+            builder: (context, setDialogState) {
+              return Form(
+                key: formKey,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextFormField(
+                        controller: nameController,
+                        decoration: const InputDecoration(labelText: 'Item name'),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Enter item name';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: quantityController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: 'Stock quantity'),
+                        validator: (value) {
+                          final parsed = int.tryParse(value ?? '');
+                          if (parsed == null || parsed < 0) {
+                            return 'Enter a valid quantity';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Use photo for item image'),
+                        value: usePhoto,
+                        onChanged: (value) {
+                          setDialogState(() {
+                            usePhoto = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 6),
+                      if (!usePhoto)
+                        DropdownButtonFormField<String>(
+                          value: selectedImageKey,
+                          decoration: const InputDecoration(labelText: 'Item icon'),
+                          items: _iconChoices
+                              .map(
+                                (choice) => DropdownMenuItem<String>(
+                                  value: choice.$1,
+                                  child: Row(
+                                    children: [
+                                      Icon(choice.$2),
+                                      const SizedBox(width: 8),
+                                      Text(choice.$3),
+                                    ],
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value == null) {
+                              return;
+                            }
+                            setDialogState(() {
+                              selectedImageKey = value;
+                            });
+                          },
+                        ),
+                      if (usePhoto) ...[
+                        Row(
+                          children: [
+                            if (!kIsWeb)
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () async {
+                                    final file = await picker.pickImage(
+                                      source: ImageSource.camera,
+                                      maxWidth: 1200,
+                                      imageQuality: 85,
+                                    );
+                                    if (file == null) {
+                                      return;
+                                    }
+                                    final bytes = await file.readAsBytes();
+                                    setDialogState(() {
+                                      photoBytes = bytes;
+                                      photoBase64 = base64Encode(bytes);
+                                    });
+                                  },
+                                  icon: const Icon(Icons.photo_camera_outlined),
+                                  label: const Text('Take pic'),
+                                ),
+                              ),
+                            if (!kIsWeb) const SizedBox(width: 10),
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: () async {
+                                  final file = await picker.pickImage(
+                                    source: ImageSource.gallery,
+                                    maxWidth: 1200,
+                                    imageQuality: 85,
+                                  );
+                                  if (file == null) {
+                                    return;
+                                  }
+                                  final bytes = await file.readAsBytes();
+                                  setDialogState(() {
+                                    photoBytes = bytes;
+                                    photoBase64 = base64Encode(bytes);
+                                  });
+                                },
+                                icon: const Icon(Icons.upload_file),
+                                label: Text(kIsWeb ? 'Upload file' : 'Gallery'),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Container(
+                          height: 140,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF2F2F2),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0x22000000)),
+                          ),
+                          child: photoBytes == null
+                              ? const Center(child: Text('No photo selected'))
+                              : ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.memory(
+                                    photoBytes!,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (!formKey.currentState!.validate()) {
+                  return;
+                }
+
+                if (usePhoto && (photoBase64 == null || photoBase64!.isEmpty)) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Select a photo (or turn off "Use photo").')),
+                  );
+                  return;
+                }
+
+                await DatabaseService.instance.updateItem(
+                  itemId: item.id,
+                  name: nameController.text.trim(),
+                  quantity: int.parse(quantityController.text.trim()),
+                  imageKey: usePhoto ? 'custom' : selectedImageKey,
+                  imageData: usePhoto ? photoBase64 : null,
+                );
+
+                if (!context.mounted) {
+                  return;
+                }
+
+                Navigator.of(context).pop(true);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+
+    nameController.dispose();
+    quantityController.dispose();
+
+    if (shouldSave == true && mounted) {
+      await _loadInventory(
+        preferredBatchId: _selectedBatch?.id,
+        preferredBoxId: _selectedBox?.id,
+        searchQuery: _searchController.text,
+      );
+    }
+  }
+
   Future<void> _showAddBatchDialog() async {
     final controller = TextEditingController();
     final shouldAdd = await showDialog<bool>(
@@ -936,7 +1152,11 @@ class InventoryPageState extends State<InventoryPage> {
                                                 childAspectRatio: 0.78,
                                               ),
                                               itemBuilder: (context, index) {
-                                                return _ItemCard(item: _items[index]);
+                                                final item = _items[index];
+                                                return _ItemCard(
+                                                  item: item,
+                                                  onEdit: () => _showEditItemDialog(item),
+                                                );
                                               },
                                             ),
                                     ),
@@ -965,9 +1185,13 @@ class InventoryPageState extends State<InventoryPage> {
 }
 
 class _ItemCard extends StatelessWidget {
-  const _ItemCard({required this.item});
+  const _ItemCard({
+    required this.item,
+    required this.onEdit,
+  });
 
   final ItemRecord item;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -984,20 +1208,37 @@ class _ItemCard extends StatelessWidget {
           children: [
             Expanded(
               child: Center(
-                child: (imageData != null && imageData.isNotEmpty)
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.memory(
-                          base64Decode(imageData),
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                        ),
-                      )
-                    : Icon(
-                        _iconForImageKey(item.imageKey),
-                        size: 52,
-                        color: const Color(0xFF54406B),
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: (imageData != null && imageData.isNotEmpty)
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: Image.memory(
+                                base64Decode(imageData),
+                                fit: BoxFit.cover,
+                              ),
+                            )
+                          : Center(
+                              child: Icon(
+                                _iconForImageKey(item.imageKey),
+                                size: 52,
+                                color: const Color(0xFF54406B),
+                              ),
+                            ),
+                    ),
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: onEdit,
+                        icon: const Icon(Icons.edit_outlined, size: 18),
                       ),
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 8),

@@ -540,6 +540,27 @@ class DatabaseService {
     });
   }
 
+  Future<void> updateItem({
+    required int itemId,
+    required String name,
+    required int quantity,
+    required String imageKey,
+    String? imageData,
+  }) async {
+    final db = await database;
+    await db.update(
+      'items',
+      {
+        'name': name.trim(),
+        'quantity': quantity,
+        'image_key': imageKey,
+        'image_data': imageData,
+      },
+      where: 'id = ?',
+      whereArgs: [itemId],
+    );
+  }
+
   Future<List<CadetRecord>> getCadets({String searchQuery = ''}) async {
     final db = await database;
     final query = searchQuery.trim();

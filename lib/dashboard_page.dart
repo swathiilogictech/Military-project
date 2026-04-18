@@ -174,7 +174,7 @@ class DashboardPage extends StatelessWidget {
               const SizedBox(height: 14),
             ],
           ),
-    );
+    ));
   }
 
   Widget _buildTableHeader() {

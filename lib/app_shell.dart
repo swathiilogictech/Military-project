@@ -6,6 +6,7 @@ import 'give_page.dart';
 import 'history_page.dart';
 import 'inventory_page.dart';
 import 'login_page.dart';
+import 'settings_page.dart';
 
 class AppShellPage extends StatefulWidget {
   const AppShellPage({super.key});
@@ -28,6 +29,12 @@ class _AppShellPageState extends State<AppShellPage> {
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(builder: (_) => const LoginPage()),
       (_) => false,
+    );
+  }
+
+  Future<void> _openSettings() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const SettingsPage()),
     );
   }
 
@@ -66,10 +73,15 @@ class _AppShellPageState extends State<AppShellPage> {
           BottomNavigationBarItem(icon: Icon(Icons.call_received), label: 'Collect'),
           BottomNavigationBarItem(icon: Icon(Icons.inventory_2_outlined), label: 'Inventory'),
           BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
           BottomNavigationBarItem(icon: Icon(Icons.logout), label: 'Logout'),
         ],
         onTap: (index) {
           if (index == 5) {
+            _openSettings();
+            return;
+          }
+          if (index == 6) {
             _logout();
             return;
           }
