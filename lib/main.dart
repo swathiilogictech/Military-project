@@ -5,6 +5,7 @@ import 'database_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await DatabaseService.instance.initialize();
   await DatabaseService.instance.database;
   runApp(const MyApp());
 }
@@ -100,7 +101,7 @@ class _LoginPageState extends State<LoginPage> {
                 Container(
                   margin: const EdgeInsets.only(bottom: 15),
                   child: Image.asset(
-                    'assets/logo.jpeg',
+                    'assets/logo.png',
                     height: 90,
                   ),
                 ),
