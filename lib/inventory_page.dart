@@ -28,7 +28,8 @@ class InventoryPageState extends State<InventoryPage> {
   List<BatchRecord> _batches = const [];
   List<BoxRecord> _boxes = const [];
   List<ItemRecord> _items = const [];
-  List<CadetRecord> _cadets = const [];
+  List<CadetHistorySummary> _cadets = const [];
+  String _cadetActionFilter = 'all';
 
   BatchRecord? _selectedBatch;
   BoxRecord? _selectedBox;
@@ -170,8 +171,10 @@ class InventoryPageState extends State<InventoryPage> {
       _isCadetLoading = true;
     });
 
-    final rows = await DatabaseService.instance.getCadets(
+    final rows = await DatabaseService.instance.getCadetHistorySummaries(
       searchQuery: searchQuery ?? _cadetSearchController.text,
+      action: _cadetActionFilter,
+      limit: 500,
     );
 
     if (!mounted) {
@@ -980,7 +983,15 @@ class InventoryPageState extends State<InventoryPage> {
                   ),
                   const SizedBox(width: 12),
                   _BackButton(
-                    onTap: () => Navigator.of(context).maybePop(),
+                    onTap: () {
+                      if (!_inventoryTabSelected) {
+                        setState(() {
+                          _inventoryTabSelected = true;
+                        });
+                        return;
+                      }
+                      Navigator.of(context).maybePop();
+                    },
                   ),
                 ],
               ),
@@ -1168,11 +1179,18 @@ class InventoryPageState extends State<InventoryPage> {
                         ))
                       : _CadetListPanel(
                           cadets: _cadets,
+                          actionFilter: _cadetActionFilter,
                           controller: _cadetSearchController,
                           isLoading: _isCadetLoading,
                           onSearchChanged: (value) => _loadCadets(searchQuery: value),
-                          onTapCadet: _openCadetDetail,
-                          onEditCadet: _openEditCadet,
+                          onFilterChanged: (value) async {
+                            setState(() {
+                              _cadetActionFilter = value;
+                            });
+                            await _loadCadets();
+                          },
+                          onTapCadet: (summary) => _openCadetDetail(summary.toCadetRecord()),
+                          onEditCadet: (summary) => _openEditCadet(summary.toCadetRecord()),
                         ),
                 ),
               ),
@@ -1266,19 +1284,23 @@ class _ItemCard extends StatelessWidget {
 class _CadetListPanel extends StatelessWidget {
   const _CadetListPanel({
     required this.cadets,
+    required this.actionFilter,
     required this.controller,
     required this.isLoading,
     required this.onSearchChanged,
+    required this.onFilterChanged,
     required this.onTapCadet,
     required this.onEditCadet,
   });
 
-  final List<CadetRecord> cadets;
+  final List<CadetHistorySummary> cadets;
+  final String actionFilter;
   final TextEditingController controller;
   final bool isLoading;
   final ValueChanged<String> onSearchChanged;
-  final ValueChanged<CadetRecord> onTapCadet;
-  final ValueChanged<CadetRecord> onEditCadet;
+  final ValueChanged<String> onFilterChanged;
+  final ValueChanged<CadetHistorySummary> onTapCadet;
+  final ValueChanged<CadetHistorySummary> onEditCadet;
 
   @override
   Widget build(BuildContext context) {
@@ -1292,35 +1314,53 @@ class _CadetListPanel extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       child: Column(
         children: [
-          Container(
-            height: 42,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1EAF7),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: TextField(
-              controller: controller,
-              onChanged: onSearchChanged,
-              decoration: const InputDecoration(
-                hintText: 'Search cadets....',
-                border: InputBorder.none,
-                prefixIcon: Icon(Icons.search),
-                contentPadding: EdgeInsets.symmetric(vertical: 10),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1EAF7),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: TextField(
+                    controller: controller,
+                    onChanged: onSearchChanged,
+                    decoration: const InputDecoration(
+                      hintText: 'Search cadets',
+                      border: InputBorder.none,
+                      prefixIcon: Icon(Icons.search),
+                      contentPadding: EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(width: 10),
+              DropdownButton<String>(
+                value: actionFilter,
+                items: const [
+                  DropdownMenuItem(value: 'all', child: Text('All')),
+                  DropdownMenuItem(value: 'give', child: Text('Given')),
+                  DropdownMenuItem(value: 'collect', child: Text('Collected')),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  onFilterChanged(value);
+                },
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: const Color(0xFFA4A0A1),
+              color: const Color(0xFFE2E8F0),
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Row(
               children: [
-                Expanded(flex: 2, child: Text('Profile', style: headerStyle)),
-                Expanded(flex: 3, child: Text('Name/ID', style: headerStyle)),
-                Expanded(flex: 2, child: Text('Taken', style: headerStyle)),
+                Expanded(flex: 4, child: Text('Name/ID', style: headerStyle)),
+                Expanded(flex: 2, child: Text('Given', style: headerStyle)),
                 Expanded(flex: 2, child: Text('Returned', style: headerStyle)),
                 Expanded(flex: 2, child: Text('Recent/Date', style: headerStyle)),
                 Expanded(flex: 1, child: Text('Edit', style: headerStyle)),
@@ -1338,56 +1378,32 @@ class _CadetListPanel extends StatelessWidget {
                         separatorBuilder: (_, __) => const SizedBox(height: 10),
                         itemBuilder: (context, index) {
                           final cadet = cadets[index];
-                          final photoData = cadet.photoData;
                           return GestureDetector(
                             onTap: () => onTapCadet(cadet),
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFC9C9C9),
+                                color: const Color(0xFFF8FAFC),
                                 borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
                               ),
                               child: Row(
                                 children: [
                                   Expanded(
-                                    flex: 2,
-                                    child: Container(
-                                      height: 64,
-                                      margin: const EdgeInsets.only(right: 10),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: (photoData != null && photoData.isNotEmpty)
-                                          ? ClipRRect(
-                                              borderRadius: BorderRadius.circular(8),
-                                              child: Image.memory(
-                                                base64Decode(photoData),
-                                                fit: BoxFit.cover,
-                                              ),
-                                            )
-                                          : const Icon(
-                                              Icons.account_circle,
-                                              size: 54,
-                                              color: Color(0xFFD7D7D7),
-                                            ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 3,
+                                    flex: 4,
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Text(
-                                          cadet.name,
+                                          cadet.cadetName,
                                           style: const TextStyle(
                                             fontWeight: FontWeight.w600,
-                                            fontSize: 18,
+                                            fontSize: 16,
                                           ),
                                         ),
                                         Text(
-                                          cadet.cadetId,
+                                          cadet.cadetCode,
                                           style: const TextStyle(
                                             fontSize: 12,
                                             color: Colors.black87,
@@ -1396,28 +1412,33 @@ class _CadetListPanel extends StatelessWidget {
                                       ],
                                     ),
                                   ),
-                                  const Expanded(
+                                  Expanded(
                                     flex: 2,
                                     child: Center(
                                       child: Text(
-                                        '-',
-                                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
+                                        '${cadet.totalGiven}',
+                                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                                       ),
                                     ),
                                   ),
-                                  const Expanded(
+                                  Expanded(
                                     flex: 2,
                                     child: Center(
                                       child: Text(
-                                        '-',
-                                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
+                                        '${cadet.totalCollected}',
+                                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                                       ),
                                     ),
                                   ),
-                                  const Expanded(
+                                  Expanded(
                                     flex: 2,
                                     child: Center(
-                                      child: Text('-', style: TextStyle(fontSize: 12)),
+                                      child: Text(
+                                        cadet.lastActivityMillis == 0
+                                            ? '-'
+                                            : _dateOnly(cadet.lastActivityMillis),
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
                                     ),
                                   ),
                                   Expanded(
@@ -1440,6 +1461,13 @@ class _CadetListPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+String _dateOnly(int millis) {
+  final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+  final dd = dt.day.toString().padLeft(2, '0');
+  final mm = dt.month.toString().padLeft(2, '0');
+  return '$dd/$mm/${dt.year}';
 }
 
 class _ModeChip extends StatelessWidget {

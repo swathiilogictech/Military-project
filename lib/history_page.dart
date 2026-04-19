@@ -1,23 +1,31 @@
 import 'package:flutter/material.dart';
 
+import 'cadet_detail_page.dart';
 import 'database_service.dart';
 
 class HistoryPage extends StatefulWidget {
-  const HistoryPage({super.key});
+  const HistoryPage({
+    super.key,
+    this.initialAction = 'all',
+  });
+
+  final String initialAction;
 
   @override
-  State<HistoryPage> createState() => _HistoryPageState();
+  State<HistoryPage> createState() => HistoryPageState();
 }
 
-class _HistoryPageState extends State<HistoryPage> {
+class HistoryPageState extends State<HistoryPage> {
   final TextEditingController _searchController = TextEditingController();
   String _action = 'all';
+
   bool _loading = true;
-  List<TransferRecord> _rows = const [];
+  List<CadetHistorySummary> _rows = const [];
 
   @override
   void initState() {
     super.initState();
+    _action = widget.initialAction;
     _load();
   }
 
@@ -27,15 +35,25 @@ class _HistoryPageState extends State<HistoryPage> {
     super.dispose();
   }
 
+  Future<void> setActionFilter(String action) async {
+    if (!mounted) return;
+    setState(() {
+      _action = action;
+    });
+    await _load();
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
     });
-    final rows = await DatabaseService.instance.getTransfers(
+
+    final rows = await DatabaseService.instance.getCadetHistorySummaries(
       searchQuery: _searchController.text,
       action: _action,
-      limit: 80,
+      limit: 300,
     );
+
     if (!mounted) return;
     setState(() {
       _rows = rows;
@@ -43,137 +61,168 @@ class _HistoryPageState extends State<HistoryPage> {
     });
   }
 
-  String _formatTime(int millis) {
-    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
-    final two = (int v) => v.toString().padLeft(2, '0');
-    return '${two(dt.day)}/${two(dt.month)}/${dt.year} ${two(dt.hour)}:${two(dt.minute)}';
+  Future<void> _openCadetDetail(CadetHistorySummary summary) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CadetDetailPage(cadet: summary.toCadetRecord()),
+      ),
+    );
+    if (!mounted) return;
+    await _load();
   }
 
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text(
-                  'Package Tracking',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-                ),
-              ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1500),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: width < 600 ? 12 : 18,
+              vertical: 12,
             ),
-            Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _searchController,
-                    onChanged: (_) => _load(),
-                    decoration: InputDecoration(
-                      hintText: 'Search cadet name/id',
-                      prefixIcon: const Icon(Icons.search),
-                      filled: true,
-                      fillColor: const Color(0xFFF1EAF7),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Cadet History',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
                       ),
                     ),
+                    Text(
+                      _formatDateTime(DateTime.now()),
+                      style: const TextStyle(color: Color(0xFF475569)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _searchController,
+                  onChanged: (_) => _load(),
+                  decoration: const InputDecoration(
+                    hintText: 'Search cadets by name or ID',
+                    prefixIcon: Icon(Icons.search),
                   ),
                 ),
-                const SizedBox(width: 12),
-                DropdownButton<String>(
-                  value: _action,
-                  items: const [
-                    DropdownMenuItem(value: 'all', child: Text('All')),
-                    DropdownMenuItem(value: 'give', child: Text('Give')),
-                    DropdownMenuItem(value: 'collect', child: Text('Collect')),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() {
-                      _action = value;
-                    });
-                    _load();
-                  },
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(value: 'all', label: Text('All')),
+                      ButtonSegment(value: 'give', label: Text('Given')),
+                      ButtonSegment(value: 'collect', label: Text('Collected')),
+                    ],
+                    selected: {_action},
+                    onSelectionChanged: (selection) {
+                      setState(() {
+                        _action = selection.first;
+                      });
+                      _load();
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: Card(
+                    clipBehavior: Clip.antiAlias,
+                    child: _loading
+                        ? const Center(child: CircularProgressIndicator())
+                        : _rows.isEmpty
+                            ? const Center(child: Text('No cadet history found.'))
+                            : ListView.separated(
+                                padding: const EdgeInsets.all(12),
+                                itemCount: _rows.length,
+                                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                                itemBuilder: (context, index) {
+                                  final row = _rows[index];
+                                  return InkWell(
+                                    borderRadius: BorderRadius.circular(14),
+                                    onTap: () => _openCadetDetail(row),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFF8FAFC),
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const CircleAvatar(
+                                            radius: 22,
+                                            backgroundColor: Color(0xFFDBEAFE),
+                                            child: Icon(Icons.person),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  row.cadetName,
+                                                  style: const TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                                Text('Cadet ID: ${row.cadetCode}'),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  'Issued: ${row.totalGiven} | Returned: ${row.totalCollected} | Holding: ${row.totalGiven - row.totalCollected}',
+                                                  style: const TextStyle(
+                                                    color: Color(0xFF334155),
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 2),
+                                                Text(
+                                                  row.lastActivityMillis == 0
+                                                      ? 'No activity yet'
+                                                      : 'Last Activity: ${_formatDateTime(DateTime.fromMillisecondsSinceEpoch(row.lastActivityMillis))}',
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          const Icon(Icons.chevron_right),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _rows.isEmpty
-                      ? const Center(child: Text('No history yet.'))
-                      : ListView.separated(
-                          itemCount: _rows.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 10),
-                          itemBuilder: (context, index) {
-                            final row = _rows[index];
-                            final isGive = row.action == 'give';
-                            final subtitleParts = <String>[
-                              '${row.batchName} • ${row.boxName}',
-                              row.itemName,
-                              'x ${row.quantity}',
-                              _formatTime(row.createdAtMillis),
-                            ];
-                            if (!isGive && row.status != null) {
-                              subtitleParts.add('as ${row.status}');
-                            }
-
-                            return Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 44,
-                                    height: 44,
-                                    decoration: BoxDecoration(
-                                      color: isGive ? const Color(0xFF4E9D72) : const Color(0xFF2FA0CB),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Icon(
-                                      isGive ? Icons.call_made : Icons.call_received,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          '${row.cadetName} (${row.cadetCode})',
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          subtitleParts.join(' • '),
-                                          style: const TextStyle(color: Colors.black87),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
+String _formatDateTime(DateTime dt) {
+  final monthNames = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+  final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+  final mm = dt.minute.toString().padLeft(2, '0');
+  return '${dt.day.toString().padLeft(2, '0')} ${monthNames[dt.month - 1]} ${dt.year}, $hour12:$mm $ampm';
+}

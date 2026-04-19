@@ -586,6 +586,7 @@ class DatabaseService {
   Future<List<TransferRecord>> getTransfers({
     String searchQuery = '',
     String action = 'all',
+    int? cadetDbId,
     int limit = 50,
   }) async {
     final db = await database;
@@ -596,6 +597,10 @@ class DatabaseService {
     if (action != 'all') {
       whereClauses.add('t.action = ?');
       args.add(action);
+    }
+    if (cadetDbId != null) {
+      whereClauses.add('t.cadet_id = ?');
+      args.add(cadetDbId);
     }
     if (query.isNotEmpty) {
       whereClauses.add('(c.name LIKE ? OR c.cadet_id LIKE ?)');
@@ -652,6 +657,53 @@ class DatabaseService {
         .toList();
   }
 
+  Future<List<CadetHistorySummary>> getCadetHistorySummaries({
+    String searchQuery = '',
+    String action = 'all',
+    int limit = 200,
+  }) async {
+    final db = await database;
+    final query = searchQuery.trim();
+    final whereClause = query.isEmpty ? '' : 'WHERE (c.name LIKE ? OR c.cadet_id LIKE ?)';
+    final whereArgs = query.isEmpty ? <Object?>[] : ['%$query%', '%$query%'];
+    final joinActionClause = action == 'all' ? '' : ' AND t.action = ?';
+    final actionArgs = action == 'all' ? <Object?>[] : <Object?>[action];
+
+    final rows = await db.rawQuery(
+      '''
+      SELECT
+        c.id AS cadet_db_id,
+        c.cadet_id AS cadet_code,
+        c.name AS cadet_name,
+        c.photo_data AS cadet_photo,
+        COALESCE(SUM(CASE WHEN t.action = 'give' THEN t.quantity ELSE 0 END), 0) AS total_given,
+        COALESCE(SUM(CASE WHEN t.action = 'collect' THEN t.quantity ELSE 0 END), 0) AS total_collected,
+        COALESCE(MAX(t.created_at), 0) AS last_activity_at
+      FROM cadets c
+      LEFT JOIN transfers t ON t.cadet_id = c.id$joinActionClause
+      $whereClause
+      GROUP BY c.id
+      ORDER BY last_activity_at DESC, c.name ASC
+      LIMIT ?
+      ''',
+      [...actionArgs, ...whereArgs, limit],
+    );
+
+    return rows
+        .map(
+          (row) => CadetHistorySummary(
+            cadetDbId: row['cadet_db_id'] as int,
+            cadetCode: row['cadet_code'] as String,
+            cadetName: row['cadet_name'] as String,
+            photoData: row['cadet_photo'] as String?,
+            totalGiven: row['total_given'] as int,
+            totalCollected: row['total_collected'] as int,
+            lastActivityMillis: row['last_activity_at'] as int,
+          ),
+        )
+        .toList();
+  }
+
   Future<int> getCadetHoldingQuantity({
     required int cadetDbId,
     required int itemId,
@@ -681,7 +733,8 @@ class DatabaseService {
         i.image_data AS image_data,
         b.name AS box_name,
         ba.name AS batch_name,
-        COALESCE(SUM(CASE WHEN t.action = 'give' THEN t.quantity ELSE -t.quantity END), 0) AS held
+        COALESCE(SUM(CASE WHEN t.action = 'give' THEN t.quantity ELSE -t.quantity END), 0) AS held,
+        COALESCE(MAX(CASE WHEN t.action = 'give' THEN t.created_at END), 0) AS latest_taken_at
       FROM transfers t
       INNER JOIN items i ON i.id = t.item_id
       INNER JOIN boxes b ON b.id = i.box_id
@@ -704,6 +757,7 @@ class DatabaseService {
             batchName: row['batch_name'] as String,
             boxName: row['box_name'] as String,
             quantityHeld: row['held'] as int,
+            latestTakenAtMillis: row['latest_taken_at'] as int,
           ),
         )
         .toList();
@@ -714,35 +768,51 @@ class DatabaseService {
     required int itemId,
     required int quantity,
   }) async {
+    await giveItems(
+      cadetDbId: cadetDbId,
+      items: [TransferInput(itemId: itemId, quantity: quantity)],
+    );
+  }
+
+  Future<void> giveItems({
+    required int cadetDbId,
+    required List<TransferInput> items,
+  }) async {
+    if (items.isEmpty) {
+      throw StateError('No items selected');
+    }
     final db = await database;
     await db.transaction((txn) async {
-      final rows = await txn.query(
-        'items',
-        columns: ['quantity'],
-        where: 'id = ?',
-        whereArgs: [itemId],
-        limit: 1,
-      );
-      final currentQty = rows.isEmpty ? 0 : (rows.first['quantity'] as int);
-      if (quantity <= 0 || currentQty < quantity) {
-        throw StateError('Not enough stock');
+      final now = DateTime.now().millisecondsSinceEpoch;
+      for (final entry in items) {
+        final rows = await txn.query(
+          'items',
+          columns: ['quantity'],
+          where: 'id = ?',
+          whereArgs: [entry.itemId],
+          limit: 1,
+        );
+        final currentQty = rows.isEmpty ? 0 : (rows.first['quantity'] as int);
+        if (entry.quantity <= 0 || currentQty < entry.quantity) {
+          throw StateError('Not enough stock');
+        }
+
+        await txn.update(
+          'items',
+          {'quantity': currentQty - entry.quantity},
+          where: 'id = ?',
+          whereArgs: [entry.itemId],
+        );
+
+        await txn.insert('transfers', {
+          'cadet_id': cadetDbId,
+          'item_id': entry.itemId,
+          'quantity': entry.quantity,
+          'action': 'give',
+          'status': null,
+          'created_at': now,
+        });
       }
-
-      await txn.update(
-        'items',
-        {'quantity': currentQty - quantity},
-        where: 'id = ?',
-        whereArgs: [itemId],
-      );
-
-      await txn.insert('transfers', {
-        'cadet_id': cadetDbId,
-        'item_id': itemId,
-        'quantity': quantity,
-        'action': 'give',
-        'status': null,
-        'created_at': DateTime.now().millisecondsSinceEpoch,
-      });
     });
   }
 
@@ -752,47 +822,69 @@ class DatabaseService {
     required int quantity,
     required String status,
   }) async {
+    await collectItems(
+      cadetDbId: cadetDbId,
+      items: [
+        CollectInput(
+          itemId: itemId,
+          quantity: quantity,
+          status: status,
+        ),
+      ],
+    );
+  }
+
+  Future<void> collectItems({
+    required int cadetDbId,
+    required List<CollectInput> items,
+  }) async {
+    if (items.isEmpty) {
+      throw StateError('No items selected');
+    }
     final db = await database;
     await db.transaction((txn) async {
-      final holdingRows = await txn.rawQuery(
-        '''
-        SELECT COALESCE(SUM(
-          CASE WHEN action = 'give' THEN quantity ELSE -quantity END
-        ), 0) AS held
-        FROM transfers
-        WHERE cadet_id = ? AND item_id = ?
-        ''',
-        [cadetDbId, itemId],
-      );
-      final held = (holdingRows.first['held'] as int?) ?? 0;
-      if (quantity <= 0 || held < quantity) {
-        throw StateError('Not enough held quantity');
-      }
-
-      await txn.insert('transfers', {
-        'cadet_id': cadetDbId,
-        'item_id': itemId,
-        'quantity': quantity,
-        'action': 'collect',
-        'status': status,
-        'created_at': DateTime.now().millisecondsSinceEpoch,
-      });
-
-      if (status != 'missing') {
-        final itemRows = await txn.query(
-          'items',
-          columns: ['quantity'],
-          where: 'id = ?',
-          whereArgs: [itemId],
-          limit: 1,
+      final now = DateTime.now().millisecondsSinceEpoch;
+      for (final entry in items) {
+        final holdingRows = await txn.rawQuery(
+          '''
+          SELECT COALESCE(SUM(
+            CASE WHEN action = 'give' THEN quantity ELSE -quantity END
+          ), 0) AS held
+          FROM transfers
+          WHERE cadet_id = ? AND item_id = ?
+          ''',
+          [cadetDbId, entry.itemId],
         );
-        final currentQty = itemRows.isEmpty ? 0 : (itemRows.first['quantity'] as int);
-        await txn.update(
-          'items',
-          {'quantity': currentQty + quantity},
-          where: 'id = ?',
-          whereArgs: [itemId],
-        );
+        final held = (holdingRows.first['held'] as int?) ?? 0;
+        if (entry.quantity <= 0 || held < entry.quantity) {
+          throw StateError('Not enough held quantity');
+        }
+
+        await txn.insert('transfers', {
+          'cadet_id': cadetDbId,
+          'item_id': entry.itemId,
+          'quantity': entry.quantity,
+          'action': 'collect',
+          'status': entry.status,
+          'created_at': now,
+        });
+
+        if (entry.status != 'missing') {
+          final itemRows = await txn.query(
+            'items',
+            columns: ['quantity'],
+            where: 'id = ?',
+            whereArgs: [entry.itemId],
+            limit: 1,
+          );
+          final currentQty = itemRows.isEmpty ? 0 : (itemRows.first['quantity'] as int);
+          await txn.update(
+            'items',
+            {'quantity': currentQty + entry.quantity},
+            where: 'id = ?',
+            whereArgs: [entry.itemId],
+          );
+        }
       }
     });
   }
@@ -934,6 +1026,57 @@ class TransferRecord {
   final String boxName;
 }
 
+class TransferInput {
+  const TransferInput({
+    required this.itemId,
+    required this.quantity,
+  });
+
+  final int itemId;
+  final int quantity;
+}
+
+class CollectInput {
+  const CollectInput({
+    required this.itemId,
+    required this.quantity,
+    required this.status,
+  });
+
+  final int itemId;
+  final int quantity;
+  final String status;
+}
+
+class CadetHistorySummary {
+  const CadetHistorySummary({
+    required this.cadetDbId,
+    required this.cadetCode,
+    required this.cadetName,
+    required this.photoData,
+    required this.totalGiven,
+    required this.totalCollected,
+    required this.lastActivityMillis,
+  });
+
+  CadetRecord toCadetRecord() {
+    return CadetRecord(
+      id: cadetDbId,
+      cadetId: cadetCode,
+      name: cadetName,
+      photoData: photoData,
+    );
+  }
+
+  final int cadetDbId;
+  final String cadetCode;
+  final String cadetName;
+  final String? photoData;
+  final int totalGiven;
+  final int totalCollected;
+  final int lastActivityMillis;
+}
+
 class CadetHoldingRecord {
   const CadetHoldingRecord({
     required this.itemId,
@@ -943,6 +1086,7 @@ class CadetHoldingRecord {
     required this.batchName,
     required this.boxName,
     required this.quantityHeld,
+    required this.latestTakenAtMillis,
   });
 
   final int itemId;
@@ -952,4 +1096,5 @@ class CadetHoldingRecord {
   final String batchName;
   final String boxName;
   final int quantityHeld;
+  final int latestTakenAtMillis;
 }

@@ -66,7 +66,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF1F5F9),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -75,13 +75,8 @@ class _LoginPageState extends State<LoginPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  margin: const EdgeInsets.only(bottom: 15),
-                  child: Image.asset(
-                    'assets/logo.png',
-                    height: 90,
-                  ),
-                ),
+                Image.asset('assets/logo.png', height: 86),
+                const SizedBox(height: 10),
                 const Text(
                   'Package Tracking',
                   style: TextStyle(
@@ -89,13 +84,16 @@ class _LoginPageState extends State<LoginPage> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                const SizedBox(height: 6),
+                const Text('Sign in to continue', style: TextStyle(color: Color(0xFF64748B))),
                 const SizedBox(height: 20),
                 Container(
-                  width: 320,
-                  padding: const EdgeInsets.all(20),
+                  width: 360,
+                  padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFD6E4E0),
-                    borderRadius: BorderRadius.circular(12),
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
                   ),
                   child: Column(
                     children: [
@@ -133,7 +131,8 @@ class _LoginPageState extends State<LoginPage> {
                       TextFormField(
                         controller: _passwordController,
                         obscureText: true,
-                        onFieldSubmitted: (_) => _isLoading ? null : _handleLogin(),
+                        onFieldSubmitted: (_) =>
+                            _isLoading ? null : _handleLogin(),
                         decoration: InputDecoration(
                           hintText: '123',
                           prefixIcon: const Icon(Icons.lock),
@@ -157,7 +156,7 @@ class _LoginPageState extends State<LoginPage> {
                         child: ElevatedButton(
                           onPressed: _isLoading ? null : _handleLogin,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.teal[800],
+                            backgroundColor: const Color(0xFF0F766E),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
@@ -183,7 +182,7 @@ class _LoginPageState extends State<LoginPage> {
                       const SizedBox(height: 10),
                       SizedBox(
                         width: double.infinity,
-                        child: ElevatedButton(
+                        child: OutlinedButton(
                           onPressed: () {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
@@ -193,8 +192,8 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             );
                           },
-                          style: ElevatedButton.styleFrom(
-                            foregroundColor: Colors.black,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF334155),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
@@ -214,4 +213,3 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 }
-

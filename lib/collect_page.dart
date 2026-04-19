@@ -15,7 +15,11 @@ class _CollectPageState extends State<CollectPage> {
   bool _cadetsLoading = true;
 
   List<CadetHoldingRecord> _holdings = const [];
-  bool _holdingsLoading = false;
+  List<TransferRecord> _collectedRows = const [];
+  bool _loading = false;
+
+  final TextEditingController _holdingSearchController = TextEditingController();
+  final Map<int, _ReturnSplit> _splits = <int, _ReturnSplit>{};
 
   @override
   void initState() {
@@ -23,40 +27,56 @@ class _CollectPageState extends State<CollectPage> {
     _loadCadets();
   }
 
+  @override
+  void dispose() {
+    _holdingSearchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadCadets() async {
-    setState(() {
-      _cadetsLoading = true;
-    });
+    setState(() => _cadetsLoading = true);
     final rows = await DatabaseService.instance.getCadets();
     if (!mounted) return;
     setState(() {
       _cadets = rows;
       _cadetsLoading = false;
-      _selectedCadet ??= rows.isEmpty ? null : rows.first;
+      if (_selectedCadet != null) {
+        _selectedCadet = rows.where((c) => c.id == _selectedCadet!.id).firstOrNull;
+      }
     });
-    await _loadHoldings();
   }
 
-  Future<void> _loadHoldings() async {
+  Future<void> _loadForCadet() async {
     final cadet = _selectedCadet;
     if (cadet == null) {
       setState(() {
         _holdings = const [];
+        _collectedRows = const [];
+        _splits.clear();
       });
       return;
     }
-    setState(() {
-      _holdingsLoading = true;
-    });
-    final rows = await DatabaseService.instance.getCadetHoldings(cadet.id);
+
+    setState(() => _loading = true);
+    final holdings = await DatabaseService.instance.getCadetHoldings(cadet.id);
+    final collected = await DatabaseService.instance.getTransfers(
+      cadetDbId: cadet.id,
+      action: 'collect',
+      limit: 300,
+    );
     if (!mounted) return;
     setState(() {
-      _holdings = rows;
-      _holdingsLoading = false;
+      _holdings = holdings;
+      _collectedRows = collected;
+      _loading = false;
+      _splits.removeWhere((itemId, _) => holdings.every((h) => h.itemId != itemId));
+      for (final h in holdings) {
+        _splits.putIfAbsent(h.itemId, () => const _ReturnSplit());
+      }
     });
   }
 
-  Future<void> _selectCadet() async {
+  Future<void> _openCadetPicker() async {
     final selected = await showModalBottomSheet<CadetRecord>(
       context: context,
       showDragHandle: true,
@@ -64,41 +84,38 @@ class _CollectPageState extends State<CollectPage> {
         final controller = TextEditingController();
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            final query = controller.text.trim().toLowerCase();
-            final filtered = query.isEmpty
+            final q = controller.text.trim().toLowerCase();
+            final filtered = q.isEmpty
                 ? _cadets
                 : _cadets
-                    .where(
-                      (c) =>
-                          c.name.toLowerCase().contains(query) ||
-                          c.cadetId.toLowerCase().contains(query),
-                    )
+                    .where((c) => c.name.toLowerCase().contains(q) || c.cadetId.toLowerCase().contains(q))
                     .toList();
             return SafeArea(
               child: Column(
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
                     child: TextField(
                       controller: controller,
                       onChanged: (_) => setSheetState(() {}),
                       decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.search),
                         hintText: 'Search cadets',
+                        prefixIcon: Icon(Icons.search),
                       ),
                     ),
                   ),
-                  Flexible(
+                  Expanded(
                     child: ListView.separated(
-                      shrinkWrap: true,
                       itemCount: filtered.length,
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final cadet = filtered[index];
                         return ListTile(
                           title: Text(cadet.name),
-                          subtitle: Text(cadet.cadetId),
+                          subtitle: Text('ID: ${cadet.cadetId}'),
+                          trailing: _selectedCadet?.id == cadet.id
+                              ? const Icon(Icons.check_circle, color: Color(0xFF0F766E))
+                              : null,
                           onTap: () => Navigator.of(context).pop(cadet),
                         );
                       },
@@ -113,199 +130,269 @@ class _CollectPageState extends State<CollectPage> {
     );
 
     if (selected != null && mounted) {
-      setState(() {
-        _selectedCadet = selected;
-      });
-      await _loadHoldings();
+      setState(() => _selectedCadet = selected);
+      await _loadForCadet();
     }
   }
 
-  Future<void> _collectHolding(CadetHoldingRecord holding) async {
+  void _adjustSplit(CadetHoldingRecord row, String status, int delta) {
+    final current = _splits[row.itemId] ?? const _ReturnSplit();
+    var next = current;
+    switch (status) {
+      case 'good':
+        next = current.copyWith(good: (current.good + delta).clamp(0, row.quantityHeld));
+        break;
+      case 'damaged':
+        next = current.copyWith(damaged: (current.damaged + delta).clamp(0, row.quantityHeld));
+        break;
+      case 'missing':
+        next = current.copyWith(missing: (current.missing + delta).clamp(0, row.quantityHeld));
+        break;
+    }
+
+    if (next.total > row.quantityHeld) return;
+    setState(() => _splits[row.itemId] = next);
+  }
+
+  Future<void> _collectSelected() async {
     final cadet = _selectedCadet;
-    if (cadet == null) return;
+    if (cadet == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select a cadet first.')));
+      return;
+    }
 
-    final qtyController = TextEditingController(text: '1');
-    String status = 'good';
-    final shouldCollect = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text('Collect ${holding.itemName}'),
-          content: StatefulBuilder(
-            builder: (context, setDialogState) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Held: ${holding.quantityHeld}'),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: qtyController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Quantity'),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: status,
-                    decoration: const InputDecoration(labelText: 'Collect as'),
-                    items: const [
-                      DropdownMenuItem(value: 'good', child: Text('Good')),
-                      DropdownMenuItem(value: 'damaged', child: Text('Damaged')),
-                      DropdownMenuItem(value: 'missing', child: Text('Missing')),
-                    ],
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setDialogState(() {
-                        status = value;
-                      });
-                    },
-                  ),
-                ],
-              );
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Collect'),
-            ),
-          ],
-        );
-      },
-    );
+    final inputs = <CollectInput>[];
+    for (final h in _holdings) {
+      final s = _splits[h.itemId] ?? const _ReturnSplit();
+      if (s.good > 0) {
+        inputs.add(CollectInput(itemId: h.itemId, quantity: s.good, status: 'good'));
+      }
+      if (s.damaged > 0) {
+        inputs.add(CollectInput(itemId: h.itemId, quantity: s.damaged, status: 'damaged'));
+      }
+      if (s.missing > 0) {
+        inputs.add(CollectInput(itemId: h.itemId, quantity: s.missing, status: 'missing'));
+      }
+    }
 
-    final qty = int.tryParse(qtyController.text.trim()) ?? 0;
-    qtyController.dispose();
-
-    if (shouldCollect != true || qty <= 0) {
+    if (inputs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select at least one return quantity.')),
+      );
       return;
     }
 
     try {
-      await DatabaseService.instance.collectItem(
-        cadetDbId: cadet.id,
-        itemId: holding.itemId,
-        quantity: qty,
-        status: status,
-      );
+      await DatabaseService.instance.collectItems(cadetDbId: cadet.id, items: inputs);
       if (!mounted) return;
+      setState(() {
+        _splits.clear();
+      });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Collected $qty × ${holding.itemName} as $status')),
+        SnackBar(content: Text('Collection saved at ${_formatDateTime(DateTime.now())}')),
       );
-      await _loadHoldings();
+      await _loadForCadet();
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid quantity to collect.')),
+        const SnackBar(content: Text('Unable to complete collection.')),
       );
     }
   }
 
+  List<CadetHoldingRecord> get _filteredHoldings {
+    final q = _holdingSearchController.text.trim().toLowerCase();
+    if (q.isEmpty) return _holdings;
+    return _holdings.where((h) => h.itemName.toLowerCase().contains(q)).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final cadet = _selectedCadet;
+    final width = MediaQuery.sizeOf(context).width;
+    final isWide = width >= 920;
+
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: EdgeInsets.symmetric(horizontal: width < 600 ? 10 : 14, vertical: 10),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text(
-                  'Package Tracking',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-                ),
-              ),
-            ),
             Row(
               children: [
                 const _ModeChip(label: 'Give', selected: false),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 const _ModeChip(label: 'Collect', selected: true),
                 const Spacer(),
-                ElevatedButton(
-                  onPressed: _cadetsLoading ? null : _selectCadet,
-                  child: const Text('Select'),
+                FilledButton.tonal(
+                  onPressed: _cadetsLoading ? null : _openCadetPicker,
+                  child: const Text('Select Cadet'),
                 ),
               ],
             ),
             const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF1EAF7),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: cadet == null
-                        ? const Text('Select a cadet to collect items.')
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Name    : ${cadet.name}'),
-                              Text('Cadet ID : ${cadet.cadetId}'),
-                            ],
-                          ),
-                  ),
-                  const Icon(Icons.account_circle, size: 48, color: Colors.grey),
-                ],
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : isWide
+                      ? Row(
+                          children: [
+                            Expanded(flex: 6, child: _buildTakenPane()),
+                            const SizedBox(width: 10),
+                            Expanded(flex: 5, child: _buildAuditPane()),
+                          ],
+                        )
+                      : Column(
+                          children: [
+                            Expanded(flex: 6, child: _buildTakenPane()),
+                            const SizedBox(height: 10),
+                            Expanded(flex: 4, child: _buildAuditPane()),
+                          ],
+                        ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTakenPane() {
+    final cadet = _selectedCadet;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              cadet == null ? 'No cadet selected' : '${cadet.name} (${cadet.cadetId})',
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _holdingSearchController,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                hintText: 'Search items',
+                prefixIcon: Icon(Icons.search),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Expanded(
-              child: _holdingsLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _holdings.isEmpty
-                      ? const Center(child: Text('No items to collect.'))
-                      : ListView.separated(
-                          itemCount: _holdings.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 10),
-                          itemBuilder: (context, index) {
-                            final holding = _holdings[index];
-                            return Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Row(
+              child: _filteredHoldings.isEmpty
+                  ? const Center(child: Text('No items currently with cadet.'))
+                  : ListView.separated(
+                      itemCount: _filteredHoldings.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, i) {
+                        final h = _filteredHoldings[i];
+                        final s = _splits[h.itemId] ?? const _ReturnSplit();
+                        return Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
                                 children: [
-                                  const Icon(Icons.inventory_2_outlined),
-                                  const SizedBox(width: 10),
                                   Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(holding.itemName),
-                                        Text(
-                                          '${holding.batchName} • ${holding.boxName}',
-                                          style: const TextStyle(fontSize: 12, color: Colors.black54),
-                                        ),
-                                      ],
+                                    child: Text(
+                                      '${h.itemName}  |  Held: ${h.quantityHeld}',
+                                      style: const TextStyle(fontWeight: FontWeight.w700),
                                     ),
                                   ),
-                                  Text('x ${holding.quantityHeld}'),
-                                  const SizedBox(width: 10),
-                                  ElevatedButton(
-                                    onPressed: cadet == null ? null : () => _collectHolding(holding),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFFDDF3FF),
-                                      foregroundColor: Colors.black87,
-                                    ),
-                                    child: const Text('Collect'),
+                                  Text(
+                                    _formatDateTime(DateTime.fromMillisecondsSinceEpoch(h.latestTakenAtMillis)),
+                                    style: const TextStyle(fontSize: 12, color: Color(0xFF475569)),
                                   ),
                                 ],
                               ),
-                            );
-                          },
-                        ),
+                              const SizedBox(height: 8),
+                              _SplitControl(
+                                label: 'Good',
+                                value: s.good,
+                                color: const Color(0xFF22C55E),
+                                onMinus: () => _adjustSplit(h, 'good', -1),
+                                onPlus: () => _adjustSplit(h, 'good', 1),
+                              ),
+                              const SizedBox(height: 6),
+                              _SplitControl(
+                                label: 'Damaged',
+                                value: s.damaged,
+                                color: const Color(0xFFF59E0B),
+                                onMinus: () => _adjustSplit(h, 'damaged', -1),
+                                onPlus: () => _adjustSplit(h, 'damaged', 1),
+                              ),
+                              const SizedBox(height: 6),
+                              _SplitControl(
+                                label: 'Missing',
+                                value: s.missing,
+                                color: const Color(0xFFEF4444),
+                                onMinus: () => _adjustSplit(h, 'missing', -1),
+                                onPlus: () => _adjustSplit(h, 'missing', 1),
+                              ),
+                              const SizedBox(height: 4),
+                              Text('Selected for return: ${s.total}/${h.quantityHeld}'),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Text(
+                  'Total selected: ${_splits.values.fold<int>(0, (sum, s) => sum + s.total)}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const Spacer(),
+                FilledButton(onPressed: _collectSelected, child: const Text('Collect')),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAuditPane() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Collected Audit', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _collectedRows.isEmpty
+                  ? const Center(child: Text('No collected records.'))
+                  : ListView.separated(
+                      itemCount: _collectedRows.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, i) {
+                        final r = _collectedRows[i];
+                        return ListTile(
+                          dense: true,
+                          title: Text('${r.itemName}  x${r.quantity}'),
+                          subtitle: Text(_formatDateTime(DateTime.fromMillisecondsSinceEpoch(r.createdAtMillis))),
+                          trailing: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(999),
+                              color: _statusColor(r.status),
+                            ),
+                            child: Text(
+                              (r.status ?? '').toUpperCase(),
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
             ),
           ],
         ),
@@ -314,11 +401,57 @@ class _CollectPageState extends State<CollectPage> {
   }
 }
 
-class _ModeChip extends StatelessWidget {
-  const _ModeChip({
+class _ReturnSplit {
+  const _ReturnSplit({this.good = 0, this.damaged = 0, this.missing = 0});
+
+  final int good;
+  final int damaged;
+  final int missing;
+
+  int get total => good + damaged + missing;
+
+  _ReturnSplit copyWith({int? good, int? damaged, int? missing}) {
+    return _ReturnSplit(
+      good: good ?? this.good,
+      damaged: damaged ?? this.damaged,
+      missing: missing ?? this.missing,
+    );
+  }
+}
+
+class _SplitControl extends StatelessWidget {
+  const _SplitControl({
     required this.label,
-    required this.selected,
+    required this.value,
+    required this.color,
+    required this.onMinus,
+    required this.onPlus,
   });
+
+  final String label;
+  final int value;
+  final Color color;
+  final VoidCallback onMinus;
+  final VoidCallback onPlus;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 90,
+          child: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700)),
+        ),
+        IconButton(onPressed: onMinus, icon: const Icon(Icons.remove_circle_outline)),
+        Text('$value', style: const TextStyle(fontWeight: FontWeight.w700)),
+        IconButton(onPressed: onPlus, icon: const Icon(Icons.add_circle_outline)),
+      ],
+    );
+  }
+}
+
+class _ModeChip extends StatelessWidget {
+  const _ModeChip({required this.label, required this.selected});
 
   final String label;
   final bool selected;
@@ -326,10 +459,10 @@ class _ModeChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
         color: selected ? const Color(0xFF4E9D72) : const Color(0xFFE7F6F1),
-        borderRadius: BorderRadius.circular(15),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Text(
         label,
@@ -342,3 +475,30 @@ class _ModeChip extends StatelessWidget {
   }
 }
 
+Color _statusColor(String? status) {
+  switch (status) {
+    case 'good':
+      return const Color(0xFF22C55E);
+    case 'damaged':
+      return const Color(0xFFF59E0B);
+    case 'missing':
+      return const Color(0xFFEF4444);
+    default:
+      return const Color(0xFF64748B);
+  }
+}
+
+String _formatDateTime(DateTime dt) {
+  final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+  final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+  final mm = dt.minute.toString().padLeft(2, '0');
+  return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} $hour12:$mm $ampm';
+}
+
+extension _FirstWhereOrNull<T> on Iterable<T> {
+  T? get firstOrNull {
+    final iterator = this.iterator;
+    if (!iterator.moveNext()) return null;
+    return iterator.current;
+  }
+}

@@ -22,6 +22,7 @@ class _GivePageState extends State<GivePage> {
   bool _inventoryLoading = true;
 
   final TextEditingController _itemSearchController = TextEditingController();
+  final Map<int, _GiveCartEntry> _cart = <int, _GiveCartEntry>{};
 
   @override
   void initState() {
@@ -37,15 +38,15 @@ class _GivePageState extends State<GivePage> {
   }
 
   Future<void> _loadCadets() async {
-    setState(() {
-      _cadetsLoading = true;
-    });
+    setState(() => _cadetsLoading = true);
     final rows = await DatabaseService.instance.getCadets();
     if (!mounted) return;
     setState(() {
       _cadets = rows;
       _cadetsLoading = false;
-      _selectedCadet ??= rows.isEmpty ? null : rows.first;
+      if (_selectedCadet != null) {
+        _selectedCadet = rows.where((c) => c.id == _selectedCadet!.id).firstOrNull;
+      }
     });
   }
 
@@ -54,9 +55,7 @@ class _GivePageState extends State<GivePage> {
     int? preferredBoxId,
     String? searchQuery,
   }) async {
-    setState(() {
-      _inventoryLoading = true;
-    });
+    setState(() => _inventoryLoading = true);
 
     final batches = await DatabaseService.instance.getBatches();
     if (batches.isEmpty) {
@@ -74,13 +73,17 @@ class _GivePageState extends State<GivePage> {
 
     final selectedBatch = batches.firstWhere(
       (batch) => batch.id == preferredBatchId,
-      orElse: () => batches.first,
+      orElse: () => _selectedBatch != null
+          ? batches.firstWhere((b) => b.id == _selectedBatch!.id, orElse: () => batches.first)
+          : batches.first,
     );
 
     final boxes = await DatabaseService.instance.getBoxesForBatch(selectedBatch.id);
     final selectedBox = boxes.firstWhere(
       (box) => box.id == preferredBoxId,
-      orElse: () => boxes.first,
+      orElse: () => _selectedBox != null
+          ? boxes.firstWhere((b) => b.id == _selectedBox!.id, orElse: () => boxes.first)
+          : boxes.first,
     );
 
     final items = await DatabaseService.instance.getItemsForBox(
@@ -99,7 +102,7 @@ class _GivePageState extends State<GivePage> {
     });
   }
 
-  Future<void> _selectCadet() async {
+  Future<void> _openCadetPicker() async {
     final selected = await showModalBottomSheet<CadetRecord>(
       context: context,
       showDragHandle: true,
@@ -107,41 +110,38 @@ class _GivePageState extends State<GivePage> {
         final controller = TextEditingController();
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            final query = controller.text.trim().toLowerCase();
-            final filtered = query.isEmpty
+            final q = controller.text.trim().toLowerCase();
+            final filtered = q.isEmpty
                 ? _cadets
                 : _cadets
-                    .where(
-                      (c) =>
-                          c.name.toLowerCase().contains(query) ||
-                          c.cadetId.toLowerCase().contains(query),
-                    )
+                    .where((c) => c.name.toLowerCase().contains(q) || c.cadetId.toLowerCase().contains(q))
                     .toList();
             return SafeArea(
               child: Column(
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
                     child: TextField(
                       controller: controller,
                       onChanged: (_) => setSheetState(() {}),
                       decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.search),
                         hintText: 'Search cadets',
+                        prefixIcon: Icon(Icons.search),
                       ),
                     ),
                   ),
-                  Flexible(
+                  Expanded(
                     child: ListView.separated(
-                      shrinkWrap: true,
                       itemCount: filtered.length,
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final cadet = filtered[index];
                         return ListTile(
                           title: Text(cadet.name),
-                          subtitle: Text(cadet.cadetId),
+                          subtitle: Text('ID: ${cadet.cadetId}'),
+                          trailing: _selectedCadet?.id == cadet.id
+                              ? const Icon(Icons.check_circle, color: Color(0xFF0F766E))
+                              : null,
                           onTap: () => Navigator.of(context).pop(cadet),
                         );
                       },
@@ -156,316 +156,260 @@ class _GivePageState extends State<GivePage> {
     );
 
     if (selected != null && mounted) {
-      setState(() {
-        _selectedCadet = selected;
-      });
+      setState(() => _selectedCadet = selected);
     }
   }
 
-  Future<void> _giveItem(ItemRecord item) async {
-    final cadet = _selectedCadet;
-    if (cadet == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a cadet first.')),
-      );
+  void _addToCart(ItemRecord item) {
+    final current = _cart[item.id]?.quantity ?? 0;
+    if (current >= item.quantity) return;
+    setState(() {
+      _cart[item.id] = _GiveCartEntry(item: item, quantity: current + 1);
+    });
+  }
+
+  void _removeFromCart(ItemRecord item) {
+    final current = _cart[item.id];
+    if (current == null) return;
+    if (current.quantity <= 1) {
+      setState(() => _cart.remove(item.id));
       return;
     }
+    setState(() {
+      _cart[item.id] = _GiveCartEntry(item: item, quantity: current.quantity - 1);
+    });
+  }
 
-    final qtyController = TextEditingController(text: '1');
-    final shouldGive = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text('Give ${item.name}'),
-          content: TextField(
-            controller: qtyController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Quantity'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Give'),
-            ),
-          ],
-        );
-      },
-    );
-
-    final qty = int.tryParse(qtyController.text.trim()) ?? 0;
-    qtyController.dispose();
-
-    if (shouldGive != true || qty <= 0) {
+  Future<void> _submitGive() async {
+    final cadet = _selectedCadet;
+    if (cadet == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select a cadet first.')));
+      return;
+    }
+    if (_cart.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Add items first.')));
       return;
     }
 
     try {
-      await DatabaseService.instance.giveItem(
+      await DatabaseService.instance.giveItems(
         cadetDbId: cadet.id,
-        itemId: item.id,
-        quantity: qty,
+        items: _cart.values.map((e) => TransferInput(itemId: e.item.id, quantity: e.quantity)).toList(),
       );
       if (!mounted) return;
+      setState(() => _cart.clear());
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Given $qty × ${item.name} to ${cadet.name}')),
+        SnackBar(content: Text('Given to ${cadet.name} at ${_formatDateTime(DateTime.now())}')),
       );
-      await _loadInventory(
-        preferredBatchId: _selectedBatch?.id,
-        preferredBoxId: _selectedBox?.id,
-        searchQuery: _itemSearchController.text,
-      );
+      await _loadInventory(preferredBatchId: _selectedBatch?.id, preferredBoxId: _selectedBox?.id);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Not enough stock for this item.')),
+        const SnackBar(content: Text('Unable to complete issue. Check stock.')),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final cadet = _selectedCadet;
-    final selectedBatch = _selectedBatch;
-    final selectedBox = _selectedBox;
+    final width = MediaQuery.sizeOf(context).width;
+    final isWide = width >= 920;
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: EdgeInsets.symmetric(horizontal: width < 600 ? 10 : 14, vertical: 10),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text(
-                  'Package Tracking',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-                ),
-              ),
-            ),
             Row(
               children: [
                 const _ModeChip(label: 'Give', selected: true),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 const _ModeChip(label: 'Collect', selected: false),
                 const Spacer(),
-                ElevatedButton(
-                  onPressed: _cadetsLoading ? null : _selectCadet,
-                  child: const Text('Select'),
+                FilledButton.tonal(
+                  onPressed: _cadetsLoading ? null : _openCadetPicker,
+                  child: const Text('Select Cadet'),
                 ),
               ],
             ),
             const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF1EAF7),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: cadet == null
-                        ? const Text('Select a cadet to give items.')
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Name    : ${cadet.name}'),
-                              Text('Cadet ID : ${cadet.cadetId}'),
-                            ],
-                          ),
+            Expanded(
+              child: isWide
+                  ? Row(
+                      children: [
+                        Expanded(flex: 7, child: _buildInventoryPanel()),
+                        const SizedBox(width: 10),
+                        Expanded(flex: 5, child: _buildPreviewPanel()),
+                      ],
+                    )
+                  : Column(
+                      children: [
+                        Expanded(flex: 6, child: _buildInventoryPanel()),
+                        const SizedBox(height: 10),
+                        Expanded(flex: 5, child: _buildPreviewPanel()),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInventoryPanel() {
+    if (_inventoryLoading) {
+      return const Card(child: Center(child: CircularProgressIndicator()));
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _itemSearchController,
+                    onChanged: (value) => _loadInventory(
+                      preferredBatchId: _selectedBatch?.id,
+                      preferredBoxId: _selectedBox?.id,
+                      searchQuery: value,
+                    ),
+                    decoration: const InputDecoration(
+                      hintText: 'Search items',
+                      prefixIcon: Icon(Icons.search),
+                    ),
                   ),
-                  const Icon(Icons.account_circle, size: 48, color: Colors.grey),
-                ],
+                ),
+                const SizedBox(width: 8),
+                Text(_selectedBatch?.name ?? '', style: const TextStyle(fontWeight: FontWeight.w700)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 38,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _batches.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) {
+                  final b = _batches[i];
+                  return FilterChip(
+                    selected: b.id == _selectedBatch?.id,
+                    label: Text(b.name),
+                    onSelected: (_) => _loadInventory(preferredBatchId: b.id),
+                  );
+                },
               ),
             ),
-            const SizedBox(height: 12),
-            if (_inventoryLoading)
-              const Expanded(child: Center(child: CircularProgressIndicator()))
-            else ...[
-              SizedBox(
-                height: 38,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _batches.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 10),
-                  itemBuilder: (context, index) {
-                    final batch = _batches[index];
-                    final isSelected = batch.id == selectedBatch?.id;
-                    return GestureDetector(
-                      onTap: () => _loadInventory(preferredBatchId: batch.id),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: isSelected ? const Color(0xFFE7EBFF) : Colors.white,
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: Text(
-                          batch.name,
-                          style: TextStyle(
-                            color: isSelected ? const Color(0xFF2F6BFF) : Colors.black87,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 38,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _boxes.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) {
+                  final b = _boxes[i];
+                  return FilterChip(
+                    selected: b.id == _selectedBox?.id,
+                    label: Text(b.name),
+                    onSelected: (_) => _loadInventory(
+                      preferredBatchId: _selectedBatch?.id,
+                      preferredBoxId: b.id,
+                    ),
+                  );
+                },
               ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF6EFFD),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 68,
-                        margin: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF3EDF9),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: ListView.separated(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          itemCount: _boxes.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 12),
-                          itemBuilder: (context, index) {
-                            final box = _boxes[index];
-                            final isSelected = box.id == selectedBox?.id;
-                            return GestureDetector(
-                              onTap: () => _loadInventory(
-                                preferredBatchId: selectedBatch?.id,
-                                preferredBoxId: box.id,
-                              ),
-                              child: Column(
-                                children: [
-                                  Icon(
-                                    Icons.inventory_2_outlined,
-                                    color: isSelected ? const Color(0xFF6B58F1) : Colors.black54,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    box.name,
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(0, 12, 12, 12),
-                          child: Column(
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Container(
-                                      height: 42,
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFF1EAF7),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: TextField(
-                                        controller: _itemSearchController,
-                                        onChanged: (value) => _loadInventory(
-                                          preferredBatchId: selectedBatch?.id,
-                                          preferredBoxId: selectedBox?.id,
-                                          searchQuery: value,
-                                        ),
-                                        decoration: const InputDecoration(
-                                          hintText: 'Search items....',
-                                          border: InputBorder.none,
-                                          prefixIcon: Icon(Icons.search),
-                                          contentPadding: EdgeInsets.symmetric(vertical: 10),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  FutureBuilder<int>(
-                                    future: selectedBatch == null
-                                        ? Future<int>.value(0)
-                                        : DatabaseService.instance
-                                            .getTotalQuantityForBatch(selectedBatch.id),
-                                    builder: (context, snapshot) {
-                                      final total = snapshot.data ?? 0;
-                                      return Text(
-                                        'Total items : $total',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 13,
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 14),
-                              Expanded(
-                                child: _items.isEmpty
-                                    ? const Center(child: Text('No items.'))
-                                    : ListView.separated(
-                                        itemCount: _items.length,
-                                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                                        itemBuilder: (context, index) {
-                                          final item = _items[index];
-                                          return Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 10,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white,
-                                              borderRadius: BorderRadius.circular(12),
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                Icon(
-                                                  Icons.inventory_2_outlined,
-                                                  color: Colors.grey.shade700,
-                                                ),
-                                                const SizedBox(width: 10),
-                                                Expanded(child: Text(item.name)),
-                                                const SizedBox(width: 10),
-                                                Text('${item.quantity}'),
-                                                const SizedBox(width: 10),
-                                                ElevatedButton(
-                                                  onPressed: cadet == null ? null : () => _giveItem(item),
-                                                  style: ElevatedButton.styleFrom(
-                                                    backgroundColor: const Color(0xFFDDF3FF),
-                                                    foregroundColor: Colors.black87,
-                                                  ),
-                                                  child: const Text('Give'),
-                                                ),
-                                              ],
-                                            ),
-                                          );
-                                        },
-                                      ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: ListView.separated(
+                itemCount: _items.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (_, i) {
+                  final item = _items[i];
+                  return ListTile(
+                    leading: const CircleAvatar(
+                      backgroundColor: Color(0xFFE2E8F0),
+                      child: Icon(Icons.inventory_2_outlined),
+                    ),
+                    title: Text(item.name),
+                    subtitle: Text('Available: ${item.quantity}'),
+                    trailing: FilledButton.tonal(
+                      onPressed: item.quantity == 0 ? null : () => _addToCart(item),
+                      child: const Text('Add'),
+                    ),
+                  );
+                },
               ),
-            ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPreviewPanel() {
+    final cadet = _selectedCadet;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              cadet == null ? 'No cadet selected' : '${cadet.name} (${cadet.cadetId})',
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _cart.isEmpty
+                  ? const Center(child: Text('No items selected'))
+                  : ListView.separated(
+                      itemCount: _cart.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (_, i) {
+                        final entry = _cart.values.elementAt(i);
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: ListTile(
+                            title: Text(entry.item.name),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  onPressed: () => _removeFromCart(entry.item),
+                                  icon: const Icon(Icons.remove_circle_outline),
+                                ),
+                                Text('${entry.quantity}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                                IconButton(
+                                  onPressed: () => _addToCart(entry.item),
+                                  icon: const Icon(Icons.add_circle_outline),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Text(
+                  'Total: ${_cart.values.fold<int>(0, (s, e) => s + e.quantity)}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const Spacer(),
+                FilledButton(onPressed: _submitGive, child: const Text('Give')),
+              ],
+            ),
           ],
         ),
       ),
@@ -473,11 +417,15 @@ class _GivePageState extends State<GivePage> {
   }
 }
 
+class _GiveCartEntry {
+  const _GiveCartEntry({required this.item, required this.quantity});
+
+  final ItemRecord item;
+  final int quantity;
+}
+
 class _ModeChip extends StatelessWidget {
-  const _ModeChip({
-    required this.label,
-    required this.selected,
-  });
+  const _ModeChip({required this.label, required this.selected});
 
   final String label;
   final bool selected;
@@ -485,10 +433,10 @@ class _ModeChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
         color: selected ? const Color(0xFF4E9D72) : const Color(0xFFE7F6F1),
-        borderRadius: BorderRadius.circular(15),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Text(
         label,
@@ -501,3 +449,17 @@ class _ModeChip extends StatelessWidget {
   }
 }
 
+String _formatDateTime(DateTime dt) {
+  final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+  final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+  final mm = dt.minute.toString().padLeft(2, '0');
+  return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} $hour12:$mm $ampm';
+}
+
+extension _FirstWhereOrNull<T> on Iterable<T> {
+  T? get firstOrNull {
+    final iterator = this.iterator;
+    if (!iterator.moveNext()) return null;
+    return iterator.current;
+  }
+}

@@ -7,343 +7,187 @@ class DashboardPage extends StatelessWidget {
     super.key,
     required this.onOpenCadets,
     required this.onOpenInventory,
+    required this.onOpenGivenHistory,
+    required this.onOpenCollectedHistory,
   });
 
   final VoidCallback onOpenCadets;
   final VoidCallback onOpenInventory;
+  final VoidCallback onOpenGivenHistory;
+  final VoidCallback onOpenCollectedHistory;
 
   @override
   Widget build(BuildContext context) {
-    final transfers = <_TransferData>[
-      const _TransferData(
-        name: 'Daniel',
-        id: '24023100',
-        taken: '7',
-        returned: '-',
-        date: '05/04/2026',
-        time: '1:10pm',
-      ),
-      const _TransferData(
-        name: 'Subash',
-        id: '24023167',
-        taken: '-',
-        returned: '5',
-        date: '14/04/2026',
-        time: '10:18pm',
-      ),
-      const _TransferData(
-        name: 'Swathi',
-        id: '24023141',
-        taken: '-',
-        returned: '5',
-        date: '08/04/2026',
-        time: '11:28pm',
-      ),
-    ];
-
     return SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: Text(
-                    'Package Tracking',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF202020),
-                    ),
-                  ),
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  'Package Tracking',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
                 ),
               ),
-              Container(
-                height: 44,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEDEDED),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search',
-                    prefixIcon: Icon(Icons.search, color: Color(0xFF8A8A8A)),
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.symmetric(vertical: 12),
+            ),
+            const SizedBox(height: 8),
+            FutureBuilder<DashboardCounts>(
+              future: DatabaseService.instance.getDashboardCounts(),
+              builder: (context, snapshot) {
+                final counts = snapshot.data;
+                final cards = <_StatCardData>[
+                  _StatCardData(
+                    title: 'Cadets',
+                    value: '${counts?.cadets ?? 0}',
+                    color: const Color(0xFFE0F2FE),
+                    textColor: const Color(0xFF0C4A6E),
+                    onTap: onOpenCadets,
                   ),
-                ),
-              ),
-              const SizedBox(height: 22),
-              FutureBuilder<DashboardCounts>(
-                future: DatabaseService.instance.getDashboardCounts(),
-                builder: (context, snapshot) {
-                  final counts = snapshot.data;
-                  final statCards = <_StatCardData>[
-                    _StatCardData(
-                      title: 'Number of\nCadets',
-                      value: '${counts?.cadets ?? 0}',
-                      color: const Color(0xFF88CF10),
-                    ),
-                    _StatCardData(
-                      title: 'Given Items',
-                      value: '${counts?.givenItems ?? 0}',
-                      color: const Color(0xFFA77AEE),
-                    ),
-                    _StatCardData(
-                      title: 'Collected\nItems',
-                      value: '${counts?.collectedItems ?? 0}',
-                      color: const Color(0xFFB25294),
-                    ),
-                    _StatCardData(
-                      title: 'Batches',
-                      value: '${counts?.batches ?? 0}',
-                      color: const Color(0xFF6FA7B3),
-                    ),
-                    _StatCardData(
-                      title: 'Boxes',
-                      value: '${counts?.boxes ?? 0}',
-                      color: const Color(0xFFC44C62),
-                    ),
-                    _StatCardData(
-                      title: 'Items',
-                      value: '${counts?.itemQuantity ?? 0}',
-                      color: const Color(0xFFB27431),
-                    ),
-                  ];
+                  _StatCardData(
+                    title: 'Given',
+                    value: '${counts?.givenItems ?? 0}',
+                    color: const Color(0xFFDCFCE7),
+                    textColor: const Color(0xFF14532D),
+                    onTap: onOpenGivenHistory,
+                  ),
+                  _StatCardData(
+                    title: 'Collected',
+                    value: '${counts?.collectedItems ?? 0}',
+                    color: const Color(0xFFFFEDD5),
+                    textColor: const Color(0xFF7C2D12),
+                    onTap: onOpenCollectedHistory,
+                  ),
+                  _StatCardData(
+                    title: 'Batches',
+                    value: '${counts?.batches ?? 0}',
+                    color: const Color(0xFFEDE9FE),
+                    textColor: const Color(0xFF4C1D95),
+                    onTap: onOpenInventory,
+                  ),
+                  _StatCardData(
+                    title: 'Boxes',
+                    value: '${counts?.boxes ?? 0}',
+                    color: const Color(0xFFF1F5F9),
+                    textColor: const Color(0xFF334155),
+                    onTap: onOpenInventory,
+                  ),
+                  _StatCardData(
+                    title: 'Items',
+                    value: '${counts?.itemQuantity ?? 0}',
+                    color: const Color(0xFFFEF3C7),
+                    textColor: const Color(0xFF78350F),
+                    onTap: onOpenInventory,
+                  ),
+                ];
 
-                  return GridView.builder(
-                    shrinkWrap: true,
-                    itemCount: statCards.length,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 18,
-                      childAspectRatio: 0.95,
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: cards.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                    childAspectRatio: 1.2,
+                  ),
+                  itemBuilder: (context, index) => _StatCard(data: cards[index]),
+                );
+              },
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Recent Cadet Activity',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            FutureBuilder<List<CadetHistorySummary>>(
+              future: DatabaseService.instance.getCadetHistorySummaries(limit: 8),
+              builder: (context, snapshot) {
+                final rows = snapshot.data ?? const <CadetHistorySummary>[];
+                if (rows.isEmpty) {
+                  return const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(18),
+                      child: Center(child: Text('No recent activity.')),
                     ),
-                    itemBuilder: (context, index) {
-                      VoidCallback? onTap;
-                      if (index == 0) {
-                        onTap = onOpenCadets;
-                      } else if (index >= 3) {
-                        onTap = onOpenInventory;
-                      }
-
-                      return _StatCard(
-                        data: statCards[index],
-                        onTap: onTap,
-                      );
-                    },
                   );
-                },
-              ),
-              const SizedBox(height: 14),
-              Center(
-                child: Container(
-                  width: 220,
-                  padding: const EdgeInsets.symmetric(vertical: 7),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2FA0CB),
-                    borderRadius: BorderRadius.circular(18),
+                }
+                return Card(
+                  child: Column(
+                    children: [
+                      ListView.separated(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: rows.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, i) {
+                          final row = rows[i];
+                          final holding = row.totalGiven - row.totalCollected;
+                          return ListTile(
+                            dense: true,
+                            title: Text('${row.cadetName} (${row.cadetCode})'),
+                            subtitle: Text('G: ${row.totalGiven}  C: ${row.totalCollected}  H: $holding'),
+                            trailing: Text(row.lastActivityMillis == 0
+                                ? '-'
+                                : _formatDateTime(DateTime.fromMillisecondsSinceEpoch(row.lastActivityMillis))),
+                          );
+                        },
+                      ),
+                    ],
                   ),
-                  child: const Text(
-                    'Recent Transfers',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              _buildTableHeader(),
-              const SizedBox(height: 8),
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: transfers.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  return _TransferCard(data: transfers[index]);
-                },
-              ),
-              const SizedBox(height: 14),
-            ],
-          ),
-    ));
-  }
-
-  Widget _buildTableHeader() {
-    const headerStyle = TextStyle(
-      color: Colors.black87,
-      fontWeight: FontWeight.w500,
-      fontSize: 14,
-    );
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFA4A0A1),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: const Row(
-        children: [
-          Expanded(flex: 2, child: Text('Profile', style: headerStyle)),
-          Expanded(flex: 3, child: Text('Name/ID', style: headerStyle)),
-          Expanded(flex: 2, child: Text('Taken', style: headerStyle)),
-          Expanded(flex: 2, child: Text('Returned', style: headerStyle)),
-          Expanded(flex: 2, child: Text('Time', style: headerStyle)),
-          Expanded(flex: 1, child: Text('Edit', style: headerStyle)),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatCard extends StatelessWidget {
-  const _StatCard({
-    required this.data,
-    this.onTap,
-  });
-
-  final _StatCardData data;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: data.color,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x33000000),
-              blurRadius: 5,
-              offset: Offset(0, 4),
+                );
+              },
             ),
           ],
         ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      ),
+    );
+  }
+
+}
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({required this.data});
+
+  final _StatCardData data;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: data.onTap,
+      child: Ink(
+        decoration: BoxDecoration(
+          color: data.color,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFCBD5E1)),
+        ),
+        child: Center(
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 data.title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 14,
+                style: TextStyle(
+                  color: data.textColor,
                   fontWeight: FontWeight.w700,
-                  color: Colors.white,
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 6),
               Text(
                 data.value,
-                style: const TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
+                style: TextStyle(
+                  fontSize: 24,
+                  color: data.textColor,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _TransferCard extends StatelessWidget {
-  const _TransferCard({required this.data});
-
-  final _TransferData data;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFC9C9C9),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 2,
-            child: Container(
-              height: 64,
-              margin: const EdgeInsets.only(right: 10),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(
-                Icons.account_circle,
-                size: 54,
-                color: Color(0xFFD7D7D7),
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  data.name,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
-                ),
-                Text(
-                  data.id,
-                  style: const TextStyle(fontSize: 12, color: Colors.black87),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Center(
-              child: Text(
-                data.taken,
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Center(
-              child: Text(
-                data.returned,
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(data.date, style: const TextStyle(fontSize: 12)),
-                const SizedBox(height: 3),
-                Text(data.time, style: const TextStyle(fontSize: 12)),
-              ],
-            ),
-          ),
-          const Expanded(
-            flex: 1,
-            child: Center(
-              child: Icon(Icons.edit_outlined, size: 24),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -354,27 +198,20 @@ class _StatCardData {
     required this.title,
     required this.value,
     required this.color,
+    required this.textColor,
+    required this.onTap,
   });
 
   final String title;
   final String value;
   final Color color;
+  final Color textColor;
+  final VoidCallback onTap;
 }
 
-class _TransferData {
-  const _TransferData({
-    required this.name,
-    required this.id,
-    required this.taken,
-    required this.returned,
-    required this.date,
-    required this.time,
-  });
-
-  final String name;
-  final String id;
-  final String taken;
-  final String returned;
-  final String date;
-  final String time;
+String _formatDateTime(DateTime dt) {
+  final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+  final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+  final mm = dt.minute.toString().padLeft(2, '0');
+  return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} $hour12:$mm $ampm';
 }
