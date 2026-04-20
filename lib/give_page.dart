@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import 'database_service.dart';
@@ -22,6 +25,8 @@ class _GivePageState extends State<GivePage> {
   bool _inventoryLoading = true;
 
   final TextEditingController _itemSearchController = TextEditingController();
+  Timer? _searchDebounce;
+  bool _isGlobalSearch = false;
   final Map<int, _GiveCartEntry> _cart = <int, _GiveCartEntry>{};
 
   @override
@@ -33,6 +38,7 @@ class _GivePageState extends State<GivePage> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _itemSearchController.dispose();
     super.dispose();
   }
@@ -88,7 +94,7 @@ class _GivePageState extends State<GivePage> {
 
     final items = await DatabaseService.instance.getItemsForBox(
       selectedBox.id,
-      searchQuery: searchQuery ?? _itemSearchController.text,
+      searchQuery: '',
     );
 
     if (!mounted) return;
@@ -99,58 +105,113 @@ class _GivePageState extends State<GivePage> {
       _selectedBatch = selectedBatch;
       _selectedBox = selectedBox;
       _inventoryLoading = false;
+      _isGlobalSearch = false;
+    });
+
+    final activeQuery = (searchQuery ?? _itemSearchController.text).trim();
+    if (activeQuery.isNotEmpty) {
+      await _searchAcrossInventory(activeQuery);
+    }
+  }
+
+  Future<void> _searchAcrossInventory(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _isGlobalSearch = false;
+      });
+      return;
+    }
+    final rows = await DatabaseService.instance.searchItemsAcrossInventory(trimmed);
+    if (!mounted) return;
+    setState(() {
+      _items = rows;
+      _isGlobalSearch = true;
+    });
+  }
+
+  void _onItemSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 180), () async {
+      if (value.trim().isEmpty) {
+        await _loadInventory(
+          preferredBatchId: _selectedBatch?.id,
+          preferredBoxId: _selectedBox?.id,
+          searchQuery: '',
+        );
+      } else {
+        await _searchAcrossInventory(value);
+      }
     });
   }
 
   Future<void> _openCadetPicker() async {
-    final selected = await showModalBottomSheet<CadetRecord>(
+    final selected = await showDialog<CadetRecord>(
       context: context,
-      showDragHandle: true,
       builder: (context) {
         final controller = TextEditingController();
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            final q = controller.text.trim().toLowerCase();
-            final filtered = q.isEmpty
-                ? _cadets
-                : _cadets
-                    .where((c) => c.name.toLowerCase().contains(q) || c.cadetId.toLowerCase().contains(q))
-                    .toList();
-            return SafeArea(
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-                    child: TextField(
+        return AlertDialog(
+          title: const Text('Select Cadet'),
+          content: StatefulBuilder(
+            builder: (context, setDialogState) {
+              final q = controller.text.trim().toLowerCase();
+              final filtered = q.isEmpty
+                  ? _cadets
+                  : _cadets
+                      .where((c) => c.name.toLowerCase().contains(q) || c.cadetId.toLowerCase().contains(q))
+                      .toList();
+              return SizedBox(
+                width: 520,
+                height: 420,
+                child: Column(
+                  children: [
+                    TextField(
                       controller: controller,
-                      onChanged: (_) => setSheetState(() {}),
+                      onChanged: (_) => setDialogState(() {}),
                       decoration: const InputDecoration(
                         hintText: 'Search cadets',
                         prefixIcon: Icon(Icons.search),
                       ),
                     ),
-                  ),
-                  Expanded(
-                    child: ListView.separated(
-                      itemCount: filtered.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final cadet = filtered[index];
-                        return ListTile(
-                          title: Text(cadet.name),
-                          subtitle: Text('ID: ${cadet.cadetId}'),
-                          trailing: _selectedCadet?.id == cadet.id
-                              ? const Icon(Icons.check_circle, color: Color(0xFF0F766E))
-                              : null,
-                          onTap: () => Navigator.of(context).pop(cadet),
-                        );
-                      },
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: ListView.separated(
+                        itemCount: filtered.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final cadet = filtered[index];
+                          return ListTile(
+                            title: Text(cadet.name),
+                            subtitle: Text('ID: ${cadet.cadetId}'),
+                            trailing: _selectedCadet?.id == cadet.id
+                                ? const Icon(Icons.check_circle, color: Color(0xFF0F766E))
+                                : null,
+                            onTap: () => Navigator.of(context).pop(cadet),
+                          );
+                        },
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            );
-          },
+                  ],
+                ),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _selectedCadet = null;
+                });
+                Navigator.of(context).pop();
+              },
+              child: const Text('Unselect'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
         );
       },
     );
@@ -178,6 +239,10 @@ class _GivePageState extends State<GivePage> {
     setState(() {
       _cart[item.id] = _GiveCartEntry(item: item, quantity: current.quantity - 1);
     });
+  }
+
+  void _deleteFromCart(ItemRecord item) {
+    setState(() => _cart.remove(item.id));
   }
 
   Future<void> _submitGive() async {
@@ -220,19 +285,6 @@ class _GivePageState extends State<GivePage> {
         padding: EdgeInsets.symmetric(horizontal: width < 600 ? 10 : 14, vertical: 10),
         child: Column(
           children: [
-            Row(
-              children: [
-                const _ModeChip(label: 'Give', selected: true),
-                const SizedBox(width: 8),
-                const _ModeChip(label: 'Collect', selected: false),
-                const Spacer(),
-                FilledButton.tonal(
-                  onPressed: _cadetsLoading ? null : _openCadetPicker,
-                  child: const Text('Select Cadet'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
             Expanded(
               child: isWide
                   ? Row(
@@ -271,78 +323,165 @@ class _GivePageState extends State<GivePage> {
                 Expanded(
                   child: TextField(
                     controller: _itemSearchController,
-                    onChanged: (value) => _loadInventory(
-                      preferredBatchId: _selectedBatch?.id,
-                      preferredBoxId: _selectedBox?.id,
-                      searchQuery: value,
-                    ),
+                    onChanged: _onItemSearchChanged,
                     decoration: const InputDecoration(
                       hintText: 'Search items',
                       prefixIcon: Icon(Icons.search),
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Text(_selectedBatch?.name ?? '', style: const TextStyle(fontWeight: FontWeight.w700)),
               ],
             ),
             const SizedBox(height: 10),
-            SizedBox(
-              height: 38,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _batches.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (_, i) {
-                  final b = _batches[i];
-                  return FilterChip(
-                    selected: b.id == _selectedBatch?.id,
-                    label: Text(b.name),
-                    onSelected: (_) => _loadInventory(preferredBatchId: b.id),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 38,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _boxes.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (_, i) {
-                  final b = _boxes[i];
-                  return FilterChip(
-                    selected: b.id == _selectedBox?.id,
-                    label: Text(b.name),
-                    onSelected: (_) => _loadInventory(
-                      preferredBatchId: _selectedBatch?.id,
-                      preferredBoxId: b.id,
+            Row(
+              children: [
+                const Text(
+                  'Batch',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    value: _selectedBatch?.id,
+                    decoration: const InputDecoration(
+                      isDense: true,
                     ),
-                  );
-                },
-              ),
+                    items: _batches
+                        .map(
+                          (b) => DropdownMenuItem<int>(
+                            value: b.id,
+                            child: Text(b.name),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      if (value == null) return;
+                      _loadInventory(preferredBatchId: value);
+                    },
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 10),
             Expanded(
-              child: ListView.separated(
-                itemCount: _items.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
-                itemBuilder: (_, i) {
-                  final item = _items[i];
-                  return ListTile(
-                    leading: const CircleAvatar(
-                      backgroundColor: Color(0xFFE2E8F0),
-                      child: Icon(Icons.inventory_2_outlined),
+              child: Row(
+                children: [
+                  Container(
+                    width: 86,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3EDF9),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    title: Text(item.name),
-                    subtitle: Text('Available: ${item.quantity}'),
-                    trailing: FilledButton.tonal(
-                      onPressed: item.quantity == 0 ? null : () => _addToCart(item),
-                      child: const Text('Add'),
+                    child: ListView.separated(
+                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                      itemCount: _boxes.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, i) {
+                        final b = _boxes[i];
+                        final selected = b.id == _selectedBox?.id;
+                        return InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () => _loadInventory(
+                            preferredBatchId: _selectedBatch?.id,
+                            preferredBoxId: b.id,
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: selected ? const Color(0xFFE7EBFF) : Colors.transparent,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Column(
+                              children: [
+                                const Icon(Icons.inventory_2_outlined, size: 18),
+                                const SizedBox(height: 2),
+                                Text(
+                                  b.name,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE2E8F0),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Row(
+                            children: [
+                              Expanded(flex: 5, child: Text('Item', style: TextStyle(fontWeight: FontWeight.w700))),
+                              Expanded(flex: 2, child: Text('Qty', style: TextStyle(fontWeight: FontWeight.w700))),
+                              Expanded(flex: 2, child: Text('Action', style: TextStyle(fontWeight: FontWeight.w700))),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Expanded(
+                          child: ListView.separated(
+                            itemCount: _items.length,
+                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            itemBuilder: (_, i) {
+                              final item = _items[i];
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      flex: 5,
+                                      child: Row(
+                                        children: [
+                                          const CircleAvatar(
+                                            radius: 16,
+                                            backgroundColor: Color(0xFFE2E8F0),
+                                            child: Icon(Icons.inventory_2_outlined, size: 18),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              item.name,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(fontSize: 16),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Expanded(
+                                      flex: 2,
+                                      child: Text(
+                                        '${item.quantity}',
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                    Expanded(
+                                      flex: 2,
+                                      child: Center(
+                                        child: FilledButton.tonal(
+                                          onPressed: item.quantity == 0 ? null : () => _addToCart(item),
+                                          child: const Text('Add'),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -359,44 +498,174 @@ class _GivePageState extends State<GivePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              cadet == null ? 'No cadet selected' : '${cadet.name} (${cadet.cadetId})',
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    cadet == null ? 'No cadet selected' : '${cadet.name} (${cadet.cadetId})',
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  ),
+                ),
+                FilledButton.tonal(
+                  onPressed: _cadetsLoading ? null : _openCadetPicker,
+                  child: const Text('Select'),
+                ),
+              ],
             ),
+            const SizedBox(height: 8),
+            if (cadet != null)
+              FutureBuilder<List<TransferRecord>>(
+                future: DatabaseService.instance.getTransfers(
+                  cadetDbId: cadet.id,
+                  action: 'all',
+                  limit: 500,
+                ),
+                builder: (context, snapshot) {
+                  final rows = snapshot.data ?? const <TransferRecord>[];
+                  final issued =
+                      rows.where((r) => r.action == 'give').fold<int>(0, (s, r) => s + r.quantity);
+                  final returned = rows
+                      .where((r) => r.action == 'collect')
+                      .fold<int>(0, (s, r) => s + r.quantity);
+                  final holding = issued - returned;
+                  final photoData = cadet.photoData;
+
+                  return Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 68,
+                          height: 68,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE2E8F0),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: (photoData != null && photoData.isNotEmpty)
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.memory(base64Decode(photoData), fit: BoxFit.cover),
+                                )
+                              : const Icon(Icons.account_circle, size: 48, color: Color(0xFF94A3B8)),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${cadet.name} (${cadet.cadetId})',
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                              ),
+                              const SizedBox(height: 2),
+                              Text('Time: ${_formatDateTime(DateTime.now())}'),
+                              const SizedBox(height: 2),
+                              Text('Issued: $issued   Returned: $returned   Holding: $holding'),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
             const SizedBox(height: 8),
             Expanded(
               child: _cart.isEmpty
                   ? const Center(child: Text('No items selected'))
-                  : ListView.separated(
-                      itemCount: _cart.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                      itemBuilder: (_, i) {
-                        final entry = _cart.values.elementAt(i);
-                        return Container(
+                  : Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                            color: const Color(0xFFE2E8F0),
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          child: ListTile(
-                            title: Text(entry.item.name),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  onPressed: () => _removeFromCart(entry.item),
-                                  icon: const Icon(Icons.remove_circle_outline),
+                          child: const Row(
+                            children: [
+                              Expanded(
+                                flex: 6,
+                                child: Text('Item', style: TextStyle(fontWeight: FontWeight.w700)),
+                              ),
+                              Expanded(
+                                flex: 2,
+                                child: Text(
+                                  'Qty',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontWeight: FontWeight.w700),
                                 ),
-                                Text('${entry.quantity}', style: const TextStyle(fontWeight: FontWeight.w700)),
-                                IconButton(
-                                  onPressed: () => _addToCart(entry.item),
-                                  icon: const Icon(Icons.add_circle_outline),
+                              ),
+                              Expanded(
+                                flex: 3,
+                                child: Text(
+                                  'Edit',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontWeight: FontWeight.w700),
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
-                        );
-                      },
+                        ),
+                        const SizedBox(height: 6),
+                        Expanded(
+                          child: ListView.separated(
+                            itemCount: _cart.length,
+                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            itemBuilder: (_, i) {
+                              final entry = _cart.values.elementAt(i);
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                child: Row(
+                                  children: [
+                                    Expanded(flex: 6, child: Text(entry.item.name)),
+                                    Expanded(
+                                      flex: 2,
+                                      child: Text(
+                                        '${entry.quantity}',
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(fontWeight: FontWeight.w700),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      flex: 3,
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          IconButton(
+                                            visualDensity: VisualDensity.compact,
+                                            constraints: const BoxConstraints(),
+                                            onPressed: () => _removeFromCart(entry.item),
+                                            icon: const Icon(Icons.remove_circle_outline),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          IconButton(
+                                            visualDensity: VisualDensity.compact,
+                                            constraints: const BoxConstraints(),
+                                            onPressed: () => _addToCart(entry.item),
+                                            icon: const Icon(Icons.add_circle_outline),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          IconButton(
+                                            visualDensity: VisualDensity.compact,
+                                            constraints: const BoxConstraints(),
+                                            onPressed: () => _deleteFromCart(entry.item),
+                                            icon: const Icon(Icons.delete_outline),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     ),
             ),
             const SizedBox(height: 8),
@@ -415,6 +684,10 @@ class _GivePageState extends State<GivePage> {
       ),
     );
   }
+
+  Widget _buildCadetSelectorBar() {
+    return const SizedBox.shrink();
+  }
 }
 
 class _GiveCartEntry {
@@ -422,31 +695,6 @@ class _GiveCartEntry {
 
   final ItemRecord item;
   final int quantity;
-}
-
-class _ModeChip extends StatelessWidget {
-  const _ModeChip({required this.label, required this.selected});
-
-  final String label;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: selected ? const Color(0xFF4E9D72) : const Color(0xFFE7F6F1),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: selected ? Colors.white : Colors.black87,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
 }
 
 String _formatDateTime(DateTime dt) {

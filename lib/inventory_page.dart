@@ -232,8 +232,6 @@ class InventoryPageState extends State<InventoryPage> {
     final formKey = GlobalKey<FormState>();
     final nameController = TextEditingController();
     final quantityController = TextEditingController();
-    String selectedImageKey = _iconChoices.first.$1;
-    bool usePhoto = false;
     Uint8List? photoBytes;
     String? photoBase64;
     final picker = ImagePicker();
@@ -275,75 +273,14 @@ class InventoryPageState extends State<InventoryPage> {
                         },
                       ),
                       const SizedBox(height: 12),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Use photo for item image'),
-                        value: usePhoto,
-                        onChanged: (value) {
-                          setDialogState(() {
-                            usePhoto = value;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 6),
-                      if (!usePhoto)
-                        DropdownButtonFormField<String>(
-                          value: selectedImageKey,
-                          decoration: const InputDecoration(labelText: 'Item icon'),
-                          items: _iconChoices
-                              .map(
-                                (choice) => DropdownMenuItem<String>(
-                                  value: choice.$1,
-                                  child: Row(
-                                    children: [
-                                      Icon(choice.$2),
-                                      const SizedBox(width: 8),
-                                      Text(choice.$3),
-                                    ],
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (value) {
-                            if (value == null) {
-                              return;
-                            }
-                            setDialogState(() {
-                              selectedImageKey = value;
-                            });
-                          },
-                        ),
-                      if (usePhoto) ...[
-                        Row(
-                          children: [
-                            if (!kIsWeb)
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: () async {
-                                    final file = await picker.pickImage(
-                                      source: ImageSource.camera,
-                                      maxWidth: 1200,
-                                      imageQuality: 85,
-                                    );
-                                    if (file == null) {
-                                      return;
-                                    }
-                                    final bytes = await file.readAsBytes();
-                                    setDialogState(() {
-                                      photoBytes = bytes;
-                                      photoBase64 = base64Encode(bytes);
-                                    });
-                                  },
-                                  icon: const Icon(Icons.photo_camera_outlined),
-                                  label: const Text('Take pic'),
-                                ),
-                              ),
-                            if (!kIsWeb) const SizedBox(width: 10),
+                      Row(
+                        children: [
+                          if (!kIsWeb)
                             Expanded(
                               child: ElevatedButton.icon(
                                 onPressed: () async {
                                   final file = await picker.pickImage(
-                                    source: ImageSource.gallery,
+                                    source: ImageSource.camera,
                                     maxWidth: 1200,
                                     imageQuality: 85,
                                   );
@@ -356,32 +293,53 @@ class InventoryPageState extends State<InventoryPage> {
                                     photoBase64 = base64Encode(bytes);
                                   });
                                 },
-                                icon: const Icon(Icons.upload_file),
-                                label: Text(kIsWeb ? 'Upload file' : 'Gallery'),
+                                icon: const Icon(Icons.photo_camera_outlined),
+                                label: const Text('Take Picture'),
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Container(
-                          height: 140,
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF2F2F2),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0x22000000)),
+                          if (!kIsWeb) const SizedBox(width: 10),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: () async {
+                                final file = await picker.pickImage(
+                                  source: ImageSource.gallery,
+                                  maxWidth: 1200,
+                                  imageQuality: 85,
+                                );
+                                if (file == null) {
+                                  return;
+                                }
+                                final bytes = await file.readAsBytes();
+                                setDialogState(() {
+                                  photoBytes = bytes;
+                                  photoBase64 = base64Encode(bytes);
+                                });
+                              },
+                              icon: const Icon(Icons.upload_file),
+                              label: const Text('Choose File'),
+                            ),
                           ),
-                          child: photoBytes == null
-                              ? const Center(child: Text('No photo selected'))
-                              : ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Image.memory(
-                                    photoBytes!,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Container(
+                        height: 140,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF2F2F2),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0x22000000)),
                         ),
-                      ],
+                        child: photoBytes == null
+                            ? const Center(child: Text('No photo selected'))
+                            : ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.memory(
+                                  photoBytes!,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                      ),
                     ],
                   ),
                 ),
@@ -399,9 +357,9 @@ class InventoryPageState extends State<InventoryPage> {
                   return;
                 }
 
-                if (usePhoto && (photoBase64 == null || photoBase64!.isEmpty)) {
+                if (photoBase64 == null || photoBase64!.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Select a photo (or turn off "Use photo").')),
+                    const SnackBar(content: Text('Select a photo first.')),
                   );
                   return;
                 }
@@ -410,8 +368,8 @@ class InventoryPageState extends State<InventoryPage> {
                   boxId: selectedBox.id,
                   name: nameController.text.trim(),
                   quantity: int.parse(quantityController.text),
-                  imageKey: usePhoto ? 'custom' : selectedImageKey,
-                  imageData: usePhoto ? photoBase64 : null,
+                  imageKey: 'custom',
+                  imageData: photoBase64,
                 );
 
                 if (!context.mounted) {
@@ -443,10 +401,8 @@ class InventoryPageState extends State<InventoryPage> {
     final nameController = TextEditingController(text: item.name);
     final quantityController = TextEditingController(text: item.quantity.toString());
 
-    bool usePhoto = (item.imageData != null && item.imageData!.isNotEmpty) || item.imageKey == 'custom';
     Uint8List? photoBytes;
     String? photoBase64 = item.imageData;
-    String selectedImageKey = item.imageKey == 'custom' ? _iconChoices.first.$1 : item.imageKey;
     final picker = ImagePicker();
 
     if (photoBase64 != null && photoBase64.isNotEmpty) {
@@ -490,75 +446,14 @@ class InventoryPageState extends State<InventoryPage> {
                         },
                       ),
                       const SizedBox(height: 12),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Use photo for item image'),
-                        value: usePhoto,
-                        onChanged: (value) {
-                          setDialogState(() {
-                            usePhoto = value;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 6),
-                      if (!usePhoto)
-                        DropdownButtonFormField<String>(
-                          value: selectedImageKey,
-                          decoration: const InputDecoration(labelText: 'Item icon'),
-                          items: _iconChoices
-                              .map(
-                                (choice) => DropdownMenuItem<String>(
-                                  value: choice.$1,
-                                  child: Row(
-                                    children: [
-                                      Icon(choice.$2),
-                                      const SizedBox(width: 8),
-                                      Text(choice.$3),
-                                    ],
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (value) {
-                            if (value == null) {
-                              return;
-                            }
-                            setDialogState(() {
-                              selectedImageKey = value;
-                            });
-                          },
-                        ),
-                      if (usePhoto) ...[
-                        Row(
-                          children: [
-                            if (!kIsWeb)
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: () async {
-                                    final file = await picker.pickImage(
-                                      source: ImageSource.camera,
-                                      maxWidth: 1200,
-                                      imageQuality: 85,
-                                    );
-                                    if (file == null) {
-                                      return;
-                                    }
-                                    final bytes = await file.readAsBytes();
-                                    setDialogState(() {
-                                      photoBytes = bytes;
-                                      photoBase64 = base64Encode(bytes);
-                                    });
-                                  },
-                                  icon: const Icon(Icons.photo_camera_outlined),
-                                  label: const Text('Take pic'),
-                                ),
-                              ),
-                            if (!kIsWeb) const SizedBox(width: 10),
+                      Row(
+                        children: [
+                          if (!kIsWeb)
                             Expanded(
                               child: ElevatedButton.icon(
                                 onPressed: () async {
                                   final file = await picker.pickImage(
-                                    source: ImageSource.gallery,
+                                    source: ImageSource.camera,
                                     maxWidth: 1200,
                                     imageQuality: 85,
                                   );
@@ -571,32 +466,53 @@ class InventoryPageState extends State<InventoryPage> {
                                     photoBase64 = base64Encode(bytes);
                                   });
                                 },
-                                icon: const Icon(Icons.upload_file),
-                                label: Text(kIsWeb ? 'Upload file' : 'Gallery'),
+                                icon: const Icon(Icons.photo_camera_outlined),
+                                label: const Text('Take Picture'),
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Container(
-                          height: 140,
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF2F2F2),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0x22000000)),
+                          if (!kIsWeb) const SizedBox(width: 10),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: () async {
+                                final file = await picker.pickImage(
+                                  source: ImageSource.gallery,
+                                  maxWidth: 1200,
+                                  imageQuality: 85,
+                                );
+                                if (file == null) {
+                                  return;
+                                }
+                                final bytes = await file.readAsBytes();
+                                setDialogState(() {
+                                  photoBytes = bytes;
+                                  photoBase64 = base64Encode(bytes);
+                                });
+                              },
+                              icon: const Icon(Icons.upload_file),
+                              label: const Text('Choose File'),
+                            ),
                           ),
-                          child: photoBytes == null
-                              ? const Center(child: Text('No photo selected'))
-                              : ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Image.memory(
-                                    photoBytes!,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Container(
+                        height: 140,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF2F2F2),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0x22000000)),
                         ),
-                      ],
+                        child: photoBytes == null
+                            ? const Center(child: Text('No photo selected'))
+                            : ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.memory(
+                                  photoBytes!,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                      ),
                     ],
                   ),
                 ),
@@ -614,9 +530,9 @@ class InventoryPageState extends State<InventoryPage> {
                   return;
                 }
 
-                if (usePhoto && (photoBase64 == null || photoBase64!.isEmpty)) {
+                if (photoBase64 == null || photoBase64!.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Select a photo (or turn off "Use photo").')),
+                    const SnackBar(content: Text('Select a photo first.')),
                   );
                   return;
                 }
@@ -625,8 +541,8 @@ class InventoryPageState extends State<InventoryPage> {
                   itemId: item.id,
                   name: nameController.text.trim(),
                   quantity: int.parse(quantityController.text.trim()),
-                  imageKey: usePhoto ? 'custom' : selectedImageKey,
-                  imageData: usePhoto ? photoBase64 : null,
+                  imageKey: 'custom',
+                  imageData: photoBase64,
                 );
 
                 if (!context.mounted) {

@@ -144,28 +144,19 @@ class _CadetDetailPageState extends State<CadetDetailPage> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: DropdownButton<String>(
-                      value: _actionFilter,
-                      items: const [
-                        DropdownMenuItem(value: 'all', child: Text('All')),
-                        DropdownMenuItem(value: 'give', child: Text('Given')),
-                        DropdownMenuItem(value: 'collect', child: Text('Collected')),
-                      ],
-                      onChanged: (value) {
-                        if (value == null) return;
-                        setState(() {
-                          _actionFilter = value;
-                        });
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 8),
                   Expanded(
                     child: _loading
                         ? const Center(child: CircularProgressIndicator())
-                        : _TransferPanel(title: 'Cadet History', rows: _filteredRows),
+                        : _TransferPanel(
+                            title: 'Cadet History',
+                            rows: _filteredRows,
+                            actionFilter: _actionFilter,
+                            onActionFilterChanged: (value) {
+                              setState(() {
+                                _actionFilter = value;
+                              });
+                            },
+                          ),
                   ),
                 ],
               ),
@@ -186,10 +177,14 @@ class _TransferPanel extends StatelessWidget {
   const _TransferPanel({
     required this.title,
     required this.rows,
+    required this.actionFilter,
+    required this.onActionFilterChanged,
   });
 
   final String title;
   final List<TransferRecord> rows;
+  final String actionFilter;
+  final ValueChanged<String> onActionFilterChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -201,60 +196,100 @@ class _TransferPanel extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             color: const Color(0xFFE2E8F0),
-            child: Text(
-              '$title (${rows.length})',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '$title (${rows.length})',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                DropdownButton<String>(
+                  value: actionFilter,
+                  items: const [
+                    DropdownMenuItem(value: 'all', child: Text('All')),
+                    DropdownMenuItem(value: 'give', child: Text('Given')),
+                    DropdownMenuItem(value: 'collect', child: Text('Collected')),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    onActionFilterChanged(value);
+                  },
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: const BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+            ),
+            child: const Row(
+              children: [
+                Expanded(flex: 3, child: Text('Item', style: TextStyle(fontWeight: FontWeight.w700))),
+                Expanded(
+                  flex: 2,
+                  child: Text('Batch/Box', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+                Expanded(
+                  flex: 1,
+                  child: Text('Qty', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text('Date/Time', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text('Status', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ],
             ),
           ),
           Expanded(
             child: rows.isEmpty
                 ? const Center(child: Text('No records.'))
                 : ListView.separated(
-                    padding: const EdgeInsets.all(10),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     itemCount: rows.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final row = rows[index];
-                      final isCollect = row.action == 'collect';
-                      return Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
-                        ),
+                      final statusText = row.action == 'give' ? 'given' : (row.status ?? 'collected');
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                         child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            CircleAvatar(
-                              radius: 18,
-                              backgroundColor: isCollect ? const Color(0xFF0EA5E9) : const Color(0xFF0F766E),
-                              child: Icon(
-                                isCollect ? Icons.call_received : Icons.call_made,
-                                size: 18,
-                                color: Colors.white,
+                            Expanded(flex: 3, child: Text(row.itemName)),
+                            Expanded(
+                              flex: 2,
+                              child: Text(
+                                '${row.batchName} / ${row.boxName}',
+                                textAlign: TextAlign.center,
                               ),
                             ),
-                            const SizedBox(width: 10),
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    '${row.itemName}  x${row.quantity}',
-                                    style: const TextStyle(fontWeight: FontWeight.w700),
-                                  ),
-                                  Text('${row.batchName} - ${row.boxName}'),
-                                  if (row.status != null)
-                                    Text(
-                                      'Status: ${row.status}',
-                                      style: const TextStyle(color: Color(0xFFB45309)),
-                                    ),
-                                  Text(
-                                    _formatDateTime(DateTime.fromMillisecondsSinceEpoch(row.createdAtMillis)),
-                                    style: const TextStyle(color: Color(0xFF334155)),
-                                  ),
-                                ],
+                              flex: 1,
+                              child: Text(
+                                '${row.quantity}',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 2,
+                              child: Text(
+                                _formatDateTime(DateTime.fromMillisecondsSinceEpoch(row.createdAtMillis)),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                            Expanded(
+                              flex: 2,
+                              child: Text(
+                                statusText,
+                                textAlign: TextAlign.center,
                               ),
                             ),
                           ],

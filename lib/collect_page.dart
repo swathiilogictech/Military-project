@@ -77,54 +77,74 @@ class _CollectPageState extends State<CollectPage> {
   }
 
   Future<void> _openCadetPicker() async {
-    final selected = await showModalBottomSheet<CadetRecord>(
+    final selected = await showDialog<CadetRecord>(
       context: context,
-      showDragHandle: true,
       builder: (context) {
         final controller = TextEditingController();
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            final q = controller.text.trim().toLowerCase();
-            final filtered = q.isEmpty
-                ? _cadets
-                : _cadets
-                    .where((c) => c.name.toLowerCase().contains(q) || c.cadetId.toLowerCase().contains(q))
-                    .toList();
-            return SafeArea(
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-                    child: TextField(
+        return AlertDialog(
+          title: const Text('Select Cadet'),
+          content: StatefulBuilder(
+            builder: (context, setDialogState) {
+              final q = controller.text.trim().toLowerCase();
+              final filtered = q.isEmpty
+                  ? _cadets
+                  : _cadets
+                      .where((c) => c.name.toLowerCase().contains(q) || c.cadetId.toLowerCase().contains(q))
+                      .toList();
+              return SizedBox(
+                width: 520,
+                height: 420,
+                child: Column(
+                  children: [
+                    TextField(
                       controller: controller,
-                      onChanged: (_) => setSheetState(() {}),
+                      onChanged: (_) => setDialogState(() {}),
                       decoration: const InputDecoration(
                         hintText: 'Search cadets',
                         prefixIcon: Icon(Icons.search),
                       ),
                     ),
-                  ),
-                  Expanded(
-                    child: ListView.separated(
-                      itemCount: filtered.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final cadet = filtered[index];
-                        return ListTile(
-                          title: Text(cadet.name),
-                          subtitle: Text('ID: ${cadet.cadetId}'),
-                          trailing: _selectedCadet?.id == cadet.id
-                              ? const Icon(Icons.check_circle, color: Color(0xFF0F766E))
-                              : null,
-                          onTap: () => Navigator.of(context).pop(cadet),
-                        );
-                      },
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: ListView.separated(
+                        itemCount: filtered.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final cadet = filtered[index];
+                          return ListTile(
+                            title: Text(cadet.name),
+                            subtitle: Text('ID: ${cadet.cadetId}'),
+                            trailing: _selectedCadet?.id == cadet.id
+                                ? const Icon(Icons.check_circle, color: Color(0xFF0F766E))
+                                : null,
+                            onTap: () => Navigator.of(context).pop(cadet),
+                          );
+                        },
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            );
-          },
+                  ],
+                ),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _selectedCadet = null;
+                  _holdings = const [];
+                  _collectedRows = const [];
+                  _splits.clear();
+                });
+                Navigator.of(context).pop();
+              },
+              child: const Text('Unselect'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
         );
       },
     );
@@ -216,19 +236,6 @@ class _CollectPageState extends State<CollectPage> {
         padding: EdgeInsets.symmetric(horizontal: width < 600 ? 10 : 14, vertical: 10),
         child: Column(
           children: [
-            Row(
-              children: [
-                const _ModeChip(label: 'Give', selected: false),
-                const SizedBox(width: 8),
-                const _ModeChip(label: 'Collect', selected: true),
-                const Spacer(),
-                FilledButton.tonal(
-                  onPressed: _cadetsLoading ? null : _openCadetPicker,
-                  child: const Text('Select Cadet'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
@@ -262,9 +269,19 @@ class _CollectPageState extends State<CollectPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              cadet == null ? 'No cadet selected' : '${cadet.name} (${cadet.cadetId})',
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    cadet == null ? 'No cadet selected' : '${cadet.name} (${cadet.cadetId})',
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  ),
+                ),
+                FilledButton.tonal(
+                  onPressed: _cadetsLoading ? null : _openCadetPicker,
+                  child: const Text('Select'),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             TextField(
@@ -446,31 +463,6 @@ class _SplitControl extends StatelessWidget {
         Text('$value', style: const TextStyle(fontWeight: FontWeight.w700)),
         IconButton(onPressed: onPlus, icon: const Icon(Icons.add_circle_outline)),
       ],
-    );
-  }
-}
-
-class _ModeChip extends StatelessWidget {
-  const _ModeChip({required this.label, required this.selected});
-
-  final String label;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: selected ? const Color(0xFF4E9D72) : const Color(0xFFE7F6F1),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: selected ? Colors.white : Colors.black87,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
     );
   }
 }

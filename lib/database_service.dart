@@ -657,6 +657,44 @@ class DatabaseService {
         .toList();
   }
 
+  Future<List<ItemRecord>> searchItemsAcrossInventory(String searchQuery) async {
+    final db = await database;
+    final query = searchQuery.trim();
+    if (query.isEmpty) {
+      return const [];
+    }
+
+    final rows = await db.rawQuery(
+      '''
+      SELECT
+        i.id,
+        i.box_id,
+        i.name,
+        i.quantity,
+        i.image_key,
+        i.image_data
+      FROM items i
+      WHERE i.name LIKE ?
+      ORDER BY i.name
+      LIMIT 250
+      ''',
+      ['%$query%'],
+    );
+
+    return rows
+        .map(
+          (row) => ItemRecord(
+            id: row['id'] as int,
+            boxId: row['box_id'] as int,
+            name: row['name'] as String,
+            quantity: row['quantity'] as int,
+            imageKey: row['image_key'] as String,
+            imageData: row['image_data'] as String?,
+          ),
+        )
+        .toList();
+  }
+
   Future<List<CadetHistorySummary>> getCadetHistorySummaries({
     String searchQuery = '',
     String action = 'all',
