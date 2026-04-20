@@ -6,7 +6,7 @@ import 'give_page.dart';
 import 'history_page.dart';
 import 'inventory_page.dart';
 import 'login_page.dart';
-import 'settings_page.dart';
+import 'reports_page.dart';
 
 class AppShellPage extends StatefulWidget {
   const AppShellPage({super.key});
@@ -63,9 +63,9 @@ class _AppShellPageState extends State<AppShellPage> {
     );
   }
 
-  Future<void> _openSettings() async {
+  Future<void> _openReports() async {
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const SettingsPage()),
+      MaterialPageRoute<void>(builder: (_) => const ReportsPage()),
     );
   }
 
@@ -115,9 +115,9 @@ class _AppShellPageState extends State<AppShellPage> {
             label: 'History',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.settings_outlined),
-            activeIcon: Icon(Icons.settings),
-            label: 'Settings',
+            icon: Icon(Icons.assessment_outlined),
+            activeIcon: Icon(Icons.assessment),
+            label: 'Reports',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.logout_outlined),
@@ -127,7 +127,7 @@ class _AppShellPageState extends State<AppShellPage> {
         ],
         onTap: (index) {
           if (index == 5) {
-            _openSettings();
+            _openReports();
             return;
           }
           if (index == 6) {
