@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:military_app/dashboadscreen.dart';
+
 
 void main() {
   runApp(const MyApp());
@@ -16,8 +18,23 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class LoginPage extends StatelessWidget {
+class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
+
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  final TextEditingController usernameController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
+
+  @override
+  void dispose() {
+    usernameController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -70,6 +87,7 @@ class LoginPage extends StatelessWidget {
                     const SizedBox(height: 5),
 
                     TextField(
+                      controller: usernameController,
                       decoration: InputDecoration(
                         hintText: "admin",
                         prefixIcon: const Icon(Icons.person),
@@ -92,6 +110,7 @@ class LoginPage extends StatelessWidget {
                     const SizedBox(height: 5),
 
                     TextField(
+                      controller: passwordController,
                       obscureText: true,
                       decoration: InputDecoration(
                         hintText: "123",
@@ -107,22 +126,43 @@ class LoginPage extends StatelessWidget {
 
                     const SizedBox(height: 20),
 
-                    // CONTINUE BUTTON
+                      // CONTINUE BUTTON
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: () {},
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.teal[800],
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
+                        onPressed: () {
+                          String username = usernameController.text;
+                          String password = passwordController.text;
+
+                          // ✅ Check empty fields
+                          if (username.isEmpty || password.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("Please enter username and password")),
+                            );
+                          }
+
+                          // ✅ Check correct login
+                          else if (username == "admin" && password == "123") {
+                            Navigator.pushReplacement(
+                              context,
+                              MaterialPageRoute(builder: (context) => const MainPage()),
+                            );
+                          }
+
+                          // ❌ Wrong login
+                          else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("Invalid username or password"),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        },
+                        child: const Text(
+                          "Continue",
+                          style: TextStyle(color: Colors.white), // 👈 your earlier requirement
                         ),
-                        child: const Text("Continue",
-                        style: TextStyle(color: Colors.white),
-                        ),
-                        
                       ),
                     ),
 
@@ -158,3 +198,6 @@ class LoginPage extends StatelessWidget {
     );
   }
 }
+
+
+
