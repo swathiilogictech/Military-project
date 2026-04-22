@@ -45,7 +45,11 @@ class _AppShellPageState extends State<AppShellPage> {
       ),
       const GivePage(),
       const CollectPage(),
+<<<<<<< HEAD
       InventoryPage(key: _inventoryKey, onBack: () => _setIndex(0)),
+=======
+      InventoryPage(key: _inventoryKey),
+>>>>>>> Kavi
       HistoryPage(key: _historyKey),
     ];
   }

@@ -13,11 +13,17 @@ class InventoryPage extends StatefulWidget {
   const InventoryPage({
     super.key,
     this.showCadets = false,
+<<<<<<< HEAD
     this.onBack,
   });
 
   final bool showCadets;
   final VoidCallback? onBack;
+=======
+  });
+
+  final bool showCadets;
+>>>>>>> Kavi
 
   @override
   State<InventoryPage> createState() => InventoryPageState();
@@ -908,11 +914,15 @@ class InventoryPageState extends State<InventoryPage> {
                         });
                         return;
                       }
+<<<<<<< HEAD
                       if (widget.onBack != null) {
                         widget.onBack!();
                       } else {
                         Navigator.of(context).maybePop();
                       }
+=======
+                      Navigator.of(context).maybePop();
+>>>>>>> Kavi
                     },
                   ),
                 ],
@@ -1285,7 +1295,11 @@ class _CadetListPanel extends StatelessWidget {
                 Expanded(flex: 2, child: Text('Given', style: headerStyle)),
                 Expanded(flex: 2, child: Text('Returned', style: headerStyle)),
                 Expanded(flex: 2, child: Text('Recent/Date', style: headerStyle)),
+<<<<<<< HEAD
                 
+=======
+                Expanded(flex: 1, child: Text('Edit', style: headerStyle)),
+>>>>>>> Kavi
               ],
             ),
           ),
@@ -1363,7 +1377,19 @@ class _CadetListPanel extends StatelessWidget {
                                       ),
                                     ),
                                   ),
+<<<<<<< HEAD
                               
+=======
+                                  Expanded(
+                                    flex: 1,
+                                    child: Center(
+                                      child: IconButton(
+                                        onPressed: () => onEditCadet(cadet),
+                                        icon: const Icon(Icons.edit_outlined, size: 24),
+                                      ),
+                                    ),
+                                  ),
+>>>>>>> Kavi
                                 ],
                               ),
                             ),

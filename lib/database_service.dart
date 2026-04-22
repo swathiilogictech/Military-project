@@ -958,6 +958,7 @@ class DatabaseService {
       whereArgs: [id],
     );
   }
+<<<<<<< HEAD
   Future<void> deleteCadet({required int id}) async {
     final db = await database;                          
     await db.delete(
@@ -966,6 +967,8 @@ class DatabaseService {
       whereArgs: [id],
     );
   }
+=======
+>>>>>>> Kavi
 }
 
 class DashboardCounts {

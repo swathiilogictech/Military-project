@@ -110,6 +110,7 @@ class _CadetEditPageState extends State<CadetEditPage> {
     }
   }
 
+<<<<<<< HEAD
   Future<void> _delete() async {
   await DatabaseService.instance.deleteCadet(
     id: widget.cadet!.id,
@@ -118,6 +119,8 @@ class _CadetEditPageState extends State<CadetEditPage> {
     Navigator.of(context).pop(true);
   }
 
+=======
+>>>>>>> Kavi
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.cadet != null;
@@ -262,6 +265,7 @@ class _CadetEditPageState extends State<CadetEditPage> {
                     onPressed: _saving ? null : () => Navigator.of(context).pop(false),
                     child: const Text('Back'),
                   ),
+<<<<<<< HEAD
                   if (isEdit && !_saving)
                     FilledButton.icon(
                     onPressed: _delete,
@@ -272,6 +276,8 @@ class _CadetEditPageState extends State<CadetEditPage> {
                       foregroundColor: const Color.fromARGB(255, 255, 255, 255),    // text color
                       ),
                     ),
+=======
+>>>>>>> Kavi
                   const SizedBox(width: 10),
                   ElevatedButton(
                     onPressed: _saving ? null : _save,
