@@ -132,16 +132,6 @@ class _CadetDetailPageState extends State<CadetDetailPage> {
                                 label: const Text('Edit'),
                               ),
                               const SizedBox(height: 8),
-                              FilledButton.icon(
-                                onPressed: () => Navigator.of(context).pop(),
-                                icon: const Icon(Icons.delete_outline),
-                                label: const Text('Delete'),
-                                style: FilledButton.styleFrom(
-                                backgroundColor: const Color.fromARGB(255, 124, 12, 12),    // button color
-                                foregroundColor: const Color.fromARGB(255, 255, 255, 255),    // text color
-                                ),
-                              ),
-                              const SizedBox(height: 8),
                               OutlinedButton.icon(
                                 onPressed: () => Navigator.of(context).pop(),
                                 icon: const Icon(Icons.arrow_back),
