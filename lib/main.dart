@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:military_app/dashboadscreen.dart';
 
+import 'database_service.dart';
+import 'login_page.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await DatabaseService.instance.initialize();
+  await DatabaseService.instance.database;
   runApp(const MyApp());
 }
 
@@ -11,193 +15,37 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
+    return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: LoginPage(),
-    );
-  }
-}
-
-class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
-
-  @override
-  State<LoginPage> createState() => _LoginPageState();
-}
-
-class _LoginPageState extends State<LoginPage> {
-  final TextEditingController usernameController = TextEditingController();
-  final TextEditingController passwordController = TextEditingController();
-
-  @override
-  void dispose() {
-    usernameController.dispose();
-    passwordController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color.fromARGB(255, 255, 255, 255),
-
-      body: Center(
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-
-              // ✅ LOGO IMAGE
-              Container(
-                margin: const EdgeInsets.only(bottom: 15),
-                child: Image.asset(
-                  'assets/logo.jpeg', // 👈 your image path
-                  height: 90,
-                ),
-              ),
-
-              // ✅ TITLE
-              const Text(
-                "Package Tracking",
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // ✅ LOGIN CARD
-              Container(
-                width: 320,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFD6E4E0),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-
-                child: Column(
-                  children: [
-
-                    // USERNAME
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text("User Name"),
-                    ),
-                    const SizedBox(height: 5),
-
-                    TextField(
-                      controller: usernameController,
-                      decoration: InputDecoration(
-                        hintText: "admin",
-                        prefixIcon: const Icon(Icons.person),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 15),
-
-                    // PASSWORD
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text("Password"),
-                    ),
-                    const SizedBox(height: 5),
-
-                    TextField(
-                      controller: passwordController,
-                      obscureText: true,
-                      decoration: InputDecoration(
-                        hintText: "123",
-                        prefixIcon: const Icon(Icons.lock),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 20),
-
-                      // CONTINUE BUTTON
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          String username = usernameController.text;
-                          String password = passwordController.text;
-
-                          // ✅ Check empty fields
-                          if (username.isEmpty || password.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text("Please enter username and password")),
-                            );
-                          }
-
-                          // ✅ Check correct login
-                          else if (username == "admin" && password == "123") {
-                            Navigator.pushReplacement(
-                              context,
-                              MaterialPageRoute(builder: (context) => const MainPage()),
-                            );
-                          }
-
-                          // ❌ Wrong login
-                          else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text("Invalid username or password"),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
-                          }
-                        },
-                        child: const Text(
-                          "Continue",
-                          style: TextStyle(color: Colors.white), // 👈 your earlier requirement
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 15),
-
-                    const Divider(),
-
-                    const SizedBox(height: 10),
-
-                    // FORGOT PASSWORD BUTTON
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () {},
-                        style: ElevatedButton.styleFrom(
-                          // backgroundColor: Colors.grey[300],
-                          foregroundColor: Colors.black,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: const Text("Forgot Password?"),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF0F766E),
+          brightness: Brightness.light,
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF1F5F9),
+        cardTheme: const CardThemeData(
+          color: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(16)),
+            side: BorderSide(color: Color(0xFFE2E8F0)),
+          ),
+        ),
+        inputDecorationTheme: const InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(12)),
+            borderSide: BorderSide(color: Color(0xFFCBD5E1)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(12)),
+            borderSide: BorderSide(color: Color(0xFFCBD5E1)),
           ),
         ),
       ),
+      home: const LoginPage(),
     );
   }
 }
-
-
-
