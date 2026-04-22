@@ -116,29 +116,68 @@ class DashboardPage extends StatelessWidget {
                   );
                 }
                 return Card(
-                  child: Column(
-                    children: [
-                      ListView.separated(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: rows.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
-                        itemBuilder: (context, i) {
-                          final row = rows[i];
-                          final holding = row.totalGiven - row.totalCollected;
-                          return ListTile(
-                            dense: true,
-                            title: Text('${row.cadetName} (${row.cadetCode})'),
-                            subtitle: Text('G: ${row.totalGiven}  C: ${row.totalCollected}  H: $holding'),
-                            trailing: Text(row.lastActivityMillis == 0
-                                ? '-'
-                                : _formatDateTime(DateTime.fromMillisecondsSinceEpoch(row.lastActivityMillis))),
-                          );
-                        },
+                child: Column(
+                  children: [
+                    // HEADER
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      color: Colors.grey.shade200,
+                      child: Row(
+                        children: const [
+                          Expanded(flex: 3, child: Text('Cadet')),
+                          Expanded(child: Text('Give', textAlign: TextAlign.center)),
+                          Expanded(child: Text('Collect', textAlign: TextAlign.center)),
+                          Expanded(child: Text('Hold', textAlign: TextAlign.center)),
+                          Expanded(flex: 2, child: Text('Date', textAlign: TextAlign.end)),
+                        ],
                       ),
-                    ],
-                  ),
-                );
+                    ),
+
+                    // LIST
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: rows.length,
+                      itemBuilder: (context, i) {
+                        final row = rows[i];
+                        final holding = row.totalGiven - row.totalCollected;
+
+                        return Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: Text('${row.cadetName} (${row.cadetCode})'),
+                              ),
+                              Expanded(
+                                child: Text('${row.totalGiven}', textAlign: TextAlign.center),
+                              ),
+                              Expanded(
+                                child: Text('${row.totalCollected}', textAlign: TextAlign.center),
+                              ),
+                              Expanded(
+                                child: Text('$holding', textAlign: TextAlign.center),
+                              ),
+                              Expanded(
+                                flex: 2,
+                                child: Text(
+                                  row.lastActivityMillis == 0
+                                      ? '-'
+                                      : _formatDateTime(
+                                          DateTime.fromMillisecondsSinceEpoch(row.lastActivityMillis),
+                                        ),
+                                  textAlign: TextAlign.end,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              );
               },
             ),
           ],

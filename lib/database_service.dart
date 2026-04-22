@@ -381,6 +381,21 @@ class DatabaseService {
     return users.isNotEmpty;
   }
 
+Future<bool> resetPassword({
+  required String username,
+  required String newPassword,
+}) async {
+  final db = await database;
+
+  final result = await db.update(
+    'users',
+    {'password': newPassword},
+    where: 'username = ?',
+    whereArgs: [username],
+  );
+
+  return result > 0;
+}
   Future<DashboardCounts> getDashboardCounts() async {
     final db = await database;
     final cadetCount = firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM cadets')) ?? 0;

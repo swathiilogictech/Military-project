@@ -110,24 +110,7 @@ class HistoryPageState extends State<HistoryPage> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: 'all', label: Text('All')),
-                      ButtonSegment(value: 'give', label: Text('Given')),
-                      ButtonSegment(value: 'collect', label: Text('Collected')),
-                    ],
-                    selected: {_action},
-                    onSelectionChanged: (selection) {
-                      setState(() {
-                        _action = selection.first;
-                      });
-                      _load();
-                    },
-                  ),
-                ),
-                const SizedBox(height: 12),
+                
                 Expanded(
                   child: Card(
                     clipBehavior: Clip.antiAlias,
@@ -151,46 +134,43 @@ class HistoryPageState extends State<HistoryPage> {
                                         borderRadius: BorderRadius.circular(14),
                                         border: Border.all(color: const Color(0xFFE2E8F0)),
                                       ),
-                                      child: Row(
-                                        children: [
-                                          const CircleAvatar(
-                                            radius: 22,
-                                            backgroundColor: Color(0xFFDBEAFE),
-                                            child: Icon(Icons.person),
+                                     child: Row(
+                                      children: [
+                                        const SizedBox(width: 50), // avatar space match header
+
+                                        Expanded(
+                                          child: Text(
+                                            row.cadetName,
+                                            style: const TextStyle(fontWeight: FontWeight.w600),
                                           ),
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  row.cadetName,
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                                ),
-                                                Text('Cadet ID: ${row.cadetCode}'),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  'Issued: ${row.totalGiven} | Returned: ${row.totalCollected} | Holding: ${row.totalGiven - row.totalCollected}',
-                                                  style: const TextStyle(
-                                                    color: Color(0xFF334155),
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 2),
-                                                Text(
-                                                  row.lastActivityMillis == 0
-                                                      ? 'No activity yet'
-                                                      : 'Last Activity: ${_formatDateTime(DateTime.fromMillisecondsSinceEpoch(row.lastActivityMillis))}',
-                                                ),
-                                              ],
-                                            ),
+                                        ),
+
+                                        Expanded(
+                                          child: Text(
+                                            '${row.totalGiven}',
+                                            textAlign: TextAlign.center,
                                           ),
-                                          const Icon(Icons.chevron_right),
-                                        ],
-                                      ),
+                                        ),
+
+                                        Expanded(
+                                          child: Text(
+                                            '${row.totalCollected}',
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ),
+
+                                        Expanded(
+                                          child: Text(
+                                            row.lastActivityMillis == 0
+                                                ? '-'
+                                                : _formatDateTime(
+                                                    DateTime.fromMillisecondsSinceEpoch(row.lastActivityMillis),
+                                                  ),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                     ),
                                   );
                                 },

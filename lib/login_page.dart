@@ -17,6 +17,61 @@ class _LoginPageState extends State<LoginPage> {
 
   bool _isLoading = false;
 
+  void _showResetDialog() {
+  final usernameController = TextEditingController();
+  final newPasswordController = TextEditingController();
+
+  showDialog(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: const Text('Reset Password'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: usernameController,
+              decoration: const InputDecoration(labelText: 'Username'),
+            ),
+            TextField(
+              controller: newPasswordController,
+              decoration: const InputDecoration(labelText: 'New Password'),
+              obscureText: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final success = await DatabaseService.instance.resetPassword(
+                username: usernameController.text.trim(),
+                newPassword: newPasswordController.text,
+              );
+
+              Navigator.pop(context);
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    success
+                        ? 'Password updated successfully'
+                        : 'User not found',
+                  ),
+                ),
+              );
+            },
+            child: const Text('Update'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
   @override
   void dispose() {
     _usernameController.dispose();
@@ -184,14 +239,8 @@ class _LoginPageState extends State<LoginPage> {
                         width: double.infinity,
                         child: OutlinedButton(
                           onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Use admin / 123 for now. Password recovery can be added later.',
-                                ),
-                              ),
-                            );
-                          },
+                            _showResetDialog();
+                          },  
                           style: OutlinedButton.styleFrom(
                             foregroundColor: const Color(0xFF334155),
                             padding: const EdgeInsets.symmetric(vertical: 14),

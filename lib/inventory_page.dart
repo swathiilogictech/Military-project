@@ -323,13 +323,12 @@ class InventoryPageState extends State<InventoryPage> {
                       ),
                       const SizedBox(height: 10),
                       Container(
-                        height: 140,
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF2F2F2),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0x22000000)),
-                        ),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
                         child: photoBytes == null
                             ? const Center(child: Text('No photo selected'))
                             : ClipRRect(
