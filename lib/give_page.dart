@@ -32,15 +32,27 @@ class _GivePageState extends State<GivePage> {
   @override
   void initState() {
     super.initState();
+    DatabaseService.instance.dataVersion.addListener(_handleDataChanged);
     _loadCadets();
     _loadInventory();
   }
 
   @override
   void dispose() {
+    DatabaseService.instance.dataVersion.removeListener(_handleDataChanged);
     _searchDebounce?.cancel();
     _itemSearchController.dispose();
     super.dispose();
+  }
+
+  void _handleDataChanged() {
+    if (!mounted) return;
+    _loadCadets();
+    _loadInventory(
+      preferredBatchId: _selectedBatch?.id,
+      preferredBoxId: _selectedBox?.id,
+      searchQuery: _itemSearchController.text,
+    );
   }
 
   Future<void> _loadCadets() async {
@@ -85,6 +97,20 @@ class _GivePageState extends State<GivePage> {
     );
 
     final boxes = await DatabaseService.instance.getBoxesForBatch(selectedBatch.id);
+    if (boxes.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _batches = batches;
+        _boxes = const [];
+        _items = const [];
+        _selectedBatch = selectedBatch;
+        _selectedBox = null;
+        _inventoryLoading = false;
+        _isGlobalSearch = false;
+      });
+      return;
+    }
+
     final selectedBox = boxes.firstWhere(
       (box) => box.id == preferredBoxId,
       orElse: () => _selectedBox != null

@@ -33,7 +33,7 @@ class _LoginPageState extends State<LoginPage> {
       _isLoading = true;
     });
 
-    final isValidUser = await DatabaseService.instance.authenticate(
+    final user = await DatabaseService.instance.authenticateUser(
       username: _usernameController.text.trim(),
       password: _passwordController.text,
     );
@@ -46,7 +46,7 @@ class _LoginPageState extends State<LoginPage> {
       _isLoading = false;
     });
 
-    if (!isValidUser) {
+    if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Invalid username or password'),
@@ -58,7 +58,7 @@ class _LoginPageState extends State<LoginPage> {
 
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(
-        builder: (_) => const AppShellPage(),
+        builder: (_) => AppShellPage(user: user),
       ),
     );
   }
@@ -185,11 +185,7 @@ class _LoginPageState extends State<LoginPage> {
                         child: OutlinedButton(
                           onPressed: () {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Use admin / 123 for now. Password recovery can be added later.',
-                                ),
-                              ),
+                              const SnackBar(content: Text('Contact admin for password reset.')),
                             );
                           },
                           style: OutlinedButton.styleFrom(

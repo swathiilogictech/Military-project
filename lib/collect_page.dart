@@ -15,7 +15,6 @@ class _CollectPageState extends State<CollectPage> {
   bool _cadetsLoading = true;
 
   List<CadetHoldingRecord> _holdings = const [];
-  List<TransferRecord> _collectedRows = const [];
   bool _loading = false;
 
   final TextEditingController _holdingSearchController = TextEditingController();
@@ -24,13 +23,23 @@ class _CollectPageState extends State<CollectPage> {
   @override
   void initState() {
     super.initState();
+    DatabaseService.instance.dataVersion.addListener(_handleDataChanged);
     _loadCadets();
   }
 
   @override
   void dispose() {
+    DatabaseService.instance.dataVersion.removeListener(_handleDataChanged);
     _holdingSearchController.dispose();
     super.dispose();
+  }
+
+  void _handleDataChanged() {
+    if (!mounted) return;
+    _loadCadets();
+    if (_selectedCadet != null) {
+      _loadForCadet();
+    }
   }
 
   Future<void> _loadCadets() async {
@@ -51,7 +60,6 @@ class _CollectPageState extends State<CollectPage> {
     if (cadet == null) {
       setState(() {
         _holdings = const [];
-        _collectedRows = const [];
         _splits.clear();
       });
       return;
@@ -59,15 +67,9 @@ class _CollectPageState extends State<CollectPage> {
 
     setState(() => _loading = true);
     final holdings = await DatabaseService.instance.getCadetHoldings(cadet.id);
-    final collected = await DatabaseService.instance.getTransfers(
-      cadetDbId: cadet.id,
-      action: 'collect',
-      limit: 300,
-    );
     if (!mounted) return;
     setState(() {
       _holdings = holdings;
-      _collectedRows = collected;
       _loading = false;
       _splits.removeWhere((itemId, _) => holdings.every((h) => h.itemId != itemId));
       for (final h in holdings) {
@@ -133,7 +135,6 @@ class _CollectPageState extends State<CollectPage> {
                 setState(() {
                   _selectedCadet = null;
                   _holdings = const [];
-                  _collectedRows = const [];
                   _splits.clear();
                 });
                 Navigator.of(context).pop();
@@ -239,21 +240,7 @@ class _CollectPageState extends State<CollectPage> {
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
-                  : isWide
-                      ? Row(
-                          children: [
-                            Expanded(flex: 6, child: _buildTakenPane()),
-                            const SizedBox(width: 10),
-                            Expanded(flex: 5, child: _buildAuditPane()),
-                          ],
-                        )
-                      : Column(
-                          children: [
-                            Expanded(flex: 6, child: _buildTakenPane()),
-                            const SizedBox(height: 10),
-                            Expanded(flex: 4, child: _buildAuditPane()),
-                          ],
-                        ),
+                  : _buildTakenPane(),
             ),
           ],
         ),
@@ -296,66 +283,127 @@ class _CollectPageState extends State<CollectPage> {
             Expanded(
               child: _filteredHoldings.isEmpty
                   ? const Center(child: Text('No items currently with cadet.'))
-                  : ListView.separated(
-                      itemCount: _filteredHoldings.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                      itemBuilder: (context, i) {
-                        final h = _filteredHoldings[i];
-                        final s = _splits[h.itemId] ?? const _ReturnSplit();
-                        return Container(
-                          padding: const EdgeInsets.all(10),
+                  : Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                            color: const Color(0xFFE2E8F0),
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          child: const Row(
                             children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      '${h.itemName}  |  Held: ${h.quantityHeld}',
-                                      style: const TextStyle(fontWeight: FontWeight.w700),
-                                    ),
-                                  ),
-                                  Text(
-                                    _formatDateTime(DateTime.fromMillisecondsSinceEpoch(h.latestTakenAtMillis)),
-                                    style: const TextStyle(fontSize: 12, color: Color(0xFF475569)),
-                                  ),
-                                ],
+                              Expanded(
+                                flex: 3,
+                                child: Text('Item', style: TextStyle(fontWeight: FontWeight.w700)),
                               ),
-                              const SizedBox(height: 8),
-                              _SplitControl(
-                                label: 'Good',
-                                value: s.good,
-                                color: const Color(0xFF22C55E),
-                                onMinus: () => _adjustSplit(h, 'good', -1),
-                                onPlus: () => _adjustSplit(h, 'good', 1),
+                              Expanded(
+                                flex: 1,
+                                child: Text('Held', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700)),
                               ),
-                              const SizedBox(height: 6),
-                              _SplitControl(
-                                label: 'Damaged',
-                                value: s.damaged,
-                                color: const Color(0xFFF59E0B),
-                                onMinus: () => _adjustSplit(h, 'damaged', -1),
-                                onPlus: () => _adjustSplit(h, 'damaged', 1),
+                              Expanded(
+                                flex: 2,
+                                child: Text('Good', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF16A34A))),
                               ),
-                              const SizedBox(height: 6),
-                              _SplitControl(
-                                label: 'Missing',
-                                value: s.missing,
-                                color: const Color(0xFFEF4444),
-                                onMinus: () => _adjustSplit(h, 'missing', -1),
-                                onPlus: () => _adjustSplit(h, 'missing', 1),
+                              Expanded(
+                                flex: 2,
+                                child: Text('Damaged', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFFD97706))),
                               ),
-                              const SizedBox(height: 4),
-                              Text('Selected for return: ${s.total}/${h.quantityHeld}'),
+                              Expanded(
+                                flex: 2,
+                                child: Text('Missing', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFFDC2626))),
+                              ),
+                              Expanded(
+                                flex: 2,
+                                child: Text('Given At', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700)),
+                              ),
                             ],
                           ),
-                        );
-                      },
+                        ),
+                        const SizedBox(height: 8),
+                        Expanded(
+                          child: ListView.separated(
+                            itemCount: _filteredHoldings.length,
+                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            itemBuilder: (context, i) {
+                              final h = _filteredHoldings[i];
+                              final s = _splits[h.itemId] ?? const _ReturnSplit();
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      flex: 3,
+                                      child: Text(
+                                        h.itemName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(fontWeight: FontWeight.w600),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      flex: 1,
+                                      child: Text(
+                                        '${h.quantityHeld}',
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(fontWeight: FontWeight.w700),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      flex: 2,
+                                      child: _QtyStepper(
+                                        value: s.good,
+                                        onMinus: () => _adjustSplit(h, 'good', -1),
+                                        onPlus: () => _adjustSplit(h, 'good', 1),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      flex: 2,
+                                      child: _QtyStepper(
+                                        value: s.damaged,
+                                        onMinus: () => _adjustSplit(h, 'damaged', -1),
+                                        onPlus: () => _adjustSplit(h, 'damaged', 1),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      flex: 2,
+                                      child: _QtyStepper(
+                                        value: s.missing,
+                                        onMinus: () => _adjustSplit(h, 'missing', -1),
+                                        onPlus: () => _adjustSplit(h, 'missing', 1),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      flex: 2,
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            _dateOnly(DateTime.fromMillisecondsSinceEpoch(h.latestTakenAtMillis)),
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            _timeOnly(DateTime.fromMillisecondsSinceEpoch(h.latestTakenAtMillis)),
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(fontSize: 11, color: Color(0xFF475569)),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     ),
             ),
             const SizedBox(height: 8),
@@ -368,48 +416,6 @@ class _CollectPageState extends State<CollectPage> {
                 const Spacer(),
                 FilledButton(onPressed: _collectSelected, child: const Text('Collect')),
               ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAuditPane() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Collected Audit', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-            const SizedBox(height: 8),
-            Expanded(
-              child: _collectedRows.isEmpty
-                  ? const Center(child: Text('No collected records.'))
-                  : ListView.separated(
-                      itemCount: _collectedRows.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (_, i) {
-                        final r = _collectedRows[i];
-                        return ListTile(
-                          dense: true,
-                          title: Text('${r.itemName}  x${r.quantity}'),
-                          subtitle: Text(_formatDateTime(DateTime.fromMillisecondsSinceEpoch(r.createdAtMillis))),
-                          trailing: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(999),
-                              color: _statusColor(r.status),
-                            ),
-                            child: Text(
-                              (r.status ?? '').toUpperCase(),
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
             ),
           ],
         ),
@@ -436,47 +442,44 @@ class _ReturnSplit {
   }
 }
 
-class _SplitControl extends StatelessWidget {
-  const _SplitControl({
-    required this.label,
+class _QtyStepper extends StatelessWidget {
+  const _QtyStepper({
     required this.value,
-    required this.color,
     required this.onMinus,
     required this.onPlus,
   });
 
-  final String label;
   final int value;
-  final Color color;
   final VoidCallback onMinus;
   final VoidCallback onPlus;
 
   @override
   Widget build(BuildContext context) {
     return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        SizedBox(
-          width: 90,
-          child: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700)),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+          onPressed: onMinus,
+          icon: const Icon(Icons.remove_circle_outline, size: 18),
         ),
-        IconButton(onPressed: onMinus, icon: const Icon(Icons.remove_circle_outline)),
-        Text('$value', style: const TextStyle(fontWeight: FontWeight.w700)),
-        IconButton(onPressed: onPlus, icon: const Icon(Icons.add_circle_outline)),
+        SizedBox(
+          width: 20,
+          child: Text(
+            '$value',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+          onPressed: onPlus,
+          icon: const Icon(Icons.add_circle_outline, size: 18),
+        ),
       ],
     );
-  }
-}
-
-Color _statusColor(String? status) {
-  switch (status) {
-    case 'good':
-      return const Color(0xFF22C55E);
-    case 'damaged':
-      return const Color(0xFFF59E0B);
-    case 'missing':
-      return const Color(0xFFEF4444);
-    default:
-      return const Color(0xFF64748B);
   }
 }
 
@@ -485,6 +488,17 @@ String _formatDateTime(DateTime dt) {
   final ampm = dt.hour >= 12 ? 'PM' : 'AM';
   final mm = dt.minute.toString().padLeft(2, '0');
   return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} $hour12:$mm $ampm';
+}
+
+String _dateOnly(DateTime dt) {
+  return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+}
+
+String _timeOnly(DateTime dt) {
+  final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+  final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+  final mm = dt.minute.toString().padLeft(2, '0');
+  return '$hour12:$mm $ampm';
 }
 
 extension _FirstWhereOrNull<T> on Iterable<T> {

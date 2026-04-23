@@ -18,12 +18,15 @@ class DashboardPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    return ValueListenableBuilder<int>(
+      valueListenable: DatabaseService.instance.dataVersion,
+      builder: (context, _, __) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
             const Center(
               child: Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
@@ -83,17 +86,29 @@ class DashboardPage extends StatelessWidget {
                   ),
                 ];
 
-                return GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: cards.length,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 10,
-                    childAspectRatio: 1.2,
-                  ),
-                  itemBuilder: (context, index) => _StatCard(data: cards[index]),
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = constraints.maxWidth;
+                    final columns = width >= 1300
+                        ? 6
+                        : width >= 1000
+                            ? 5
+                            : width >= 760
+                                ? 4
+                                : 3;
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: cards.length,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        crossAxisSpacing: 8,
+                        mainAxisSpacing: 8,
+                        childAspectRatio: 1.7,
+                      ),
+                      itemBuilder: (context, index) => _StatCard(data: cards[index]),
+                    );
+                  },
                 );
               },
             ),
@@ -116,8 +131,56 @@ class DashboardPage extends StatelessWidget {
                   );
                 }
                 return Card(
+                  clipBehavior: Clip.antiAlias,
                   child: Column(
                     children: [
+                      Container(
+                        color: const Color(0xFFE2E8F0),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        child: const Row(
+                          children: [
+                            Expanded(
+                              flex: 4,
+                              child: Text(
+                                'Cadet',
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 2,
+                              child: Text(
+                                'Give',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 2,
+                              child: Text(
+                                'Collect',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 2,
+                              child: Text(
+                                'Holdings',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 3,
+                              child: Text(
+                                'Recent Date & Time',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                       ListView.separated(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
@@ -126,13 +189,61 @@ class DashboardPage extends StatelessWidget {
                         itemBuilder: (context, i) {
                           final row = rows[i];
                           final holding = row.totalGiven - row.totalCollected;
-                          return ListTile(
-                            dense: true,
-                            title: Text('${row.cadetName} (${row.cadetCode})'),
-                            subtitle: Text('G: ${row.totalGiven}  C: ${row.totalCollected}  H: $holding'),
-                            trailing: Text(row.lastActivityMillis == 0
-                                ? '-'
-                                : _formatDateTime(DateTime.fromMillisecondsSinceEpoch(row.lastActivityMillis))),
+                          final gaveLast = row.lastAction == 'give';
+                          final collectedLast = row.lastAction == 'collect';
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  flex: 4,
+                                  child: Text(
+                                    '${row.cadetName} (${row.cadetCode})',
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 2,
+                                  child: Text(
+                                    '${row.totalGiven}',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: gaveLast ? FontWeight.w800 : FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 2,
+                                  child: Text(
+                                    '${row.totalCollected}',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: collectedLast ? FontWeight.w800 : FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 2,
+                                  child: Text(
+                                    '$holding',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 3,
+                                  child: Text(
+                                    row.lastActivityMillis == 0
+                                        ? '-'
+                                        : _formatDateTime(DateTime.fromMillisecondsSinceEpoch(row.lastActivityMillis)),
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                ),
+                              ],
+                            ),
                           );
                         },
                       ),
@@ -141,9 +252,11 @@ class DashboardPage extends StatelessWidget {
                 );
               },
             ),
-          ],
-        ),
-      ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -172,15 +285,16 @@ class _StatCard extends StatelessWidget {
               Text(
                 data.title,
                 style: TextStyle(
+                  fontSize: 16,
                   color: data.textColor,
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
               Text(
                 data.value,
                 style: TextStyle(
-                  fontSize: 24,
+                  fontSize: 20,
                   color: data.textColor,
                   fontWeight: FontWeight.w800,
                 ),
