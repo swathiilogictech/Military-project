@@ -7,9 +7,16 @@ import 'history_page.dart';
 import 'inventory_page.dart';
 import 'login_page.dart';
 import 'reports_page.dart';
+import 'settings_page.dart';
+import 'database_service.dart';
 
 class AppShellPage extends StatefulWidget {
-  const AppShellPage({super.key});
+  const AppShellPage({
+    super.key,
+    required this.user,
+  });
+
+  final AppUser user;
 
   @override
   State<AppShellPage> createState() => _AppShellPageState();
@@ -20,10 +27,12 @@ class _AppShellPageState extends State<AppShellPage> {
   final GlobalKey<InventoryPageState> _inventoryKey = GlobalKey<InventoryPageState>();
   final GlobalKey<HistoryPageState> _historyKey = GlobalKey<HistoryPageState>();
   late final List<Widget> _pages;
+  late final bool _isAdmin;
 
   @override
   void initState() {
     super.initState();
+    _isAdmin = widget.user.isAdmin;
     _pages = <Widget>[
       DashboardPage(
         onOpenCadets: () {
@@ -45,8 +54,15 @@ class _AppShellPageState extends State<AppShellPage> {
       ),
       const GivePage(),
       const CollectPage(),
-      InventoryPage(key: _inventoryKey),
+      InventoryPage(
+        key: _inventoryKey,
+        canManageInventory: widget.user.isAdmin || widget.user.canManageInventory,
+        canCadetImportExport: widget.user.isAdmin || widget.user.canCadetImportExport,
+        canViewCollectedInventory: widget.user.isAdmin || widget.user.canViewCollectedInventory,
+      ),
       HistoryPage(key: _historyKey),
+      const ReportsPage(),
+      if (_isAdmin) const SettingsPage(),
     ];
   }
 
@@ -57,15 +73,10 @@ class _AppShellPageState extends State<AppShellPage> {
   }
 
   Future<void> _logout() async {
+    DatabaseService.instance.logoutUser();
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(builder: (_) => const LoginPage()),
       (_) => false,
-    );
-  }
-
-  Future<void> _openReports() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const ReportsPage()),
     );
   }
 
@@ -88,49 +99,57 @@ class _AppShellPageState extends State<AppShellPage> {
         unselectedIconTheme: const IconThemeData(size: 22),
         showSelectedLabels: true,
         showUnselectedLabels: true,
-        items: const [
-          BottomNavigationBarItem(
+        items: [
+          const BottomNavigationBarItem(
             icon: Icon(Icons.home_outlined),
             activeIcon: Icon(Icons.home_filled),
             label: 'Home',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.call_made),
             activeIcon: Icon(Icons.call_made),
             label: 'Give',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.call_received),
             activeIcon: Icon(Icons.call_received),
             label: 'Collect',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.inventory_2_outlined),
             activeIcon: Icon(Icons.inventory_2),
             label: 'Inventory',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.history_outlined),
             activeIcon: Icon(Icons.history),
             label: 'History',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.assessment_outlined),
             activeIcon: Icon(Icons.assessment),
             label: 'Reports',
           ),
-          BottomNavigationBarItem(
+          if (_isAdmin)
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.settings_outlined),
+              activeIcon: Icon(Icons.settings),
+              label: 'Settings',
+            ),
+          const BottomNavigationBarItem(
             icon: Icon(Icons.logout_outlined),
             activeIcon: Icon(Icons.logout),
             label: 'Logout',
           ),
         ],
         onTap: (index) {
-          if (index == 5) {
-            _openReports();
+          final settingsIndex = _isAdmin ? 6 : -1;
+          final logoutIndex = _isAdmin ? 7 : 6;
+          if (_isAdmin && index == settingsIndex) {
+            _setIndex(index);
             return;
           }
-          if (index == 6) {
+          if (index == logoutIndex) {
             _logout();
             return;
           }

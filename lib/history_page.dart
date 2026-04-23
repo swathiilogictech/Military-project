@@ -17,7 +17,6 @@ class HistoryPage extends StatefulWidget {
 
 class HistoryPageState extends State<HistoryPage> {
   final TextEditingController _searchController = TextEditingController();
-  String _action = 'all';
 
   bool _loading = true;
   List<CadetHistorySummary> _rows = const [];
@@ -25,21 +24,23 @@ class HistoryPageState extends State<HistoryPage> {
   @override
   void initState() {
     super.initState();
-    _action = widget.initialAction;
+    DatabaseService.instance.dataVersion.addListener(_handleDataChanged);
     _load();
   }
 
   @override
   void dispose() {
+    DatabaseService.instance.dataVersion.removeListener(_handleDataChanged);
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> setActionFilter(String action) async {
+  void _handleDataChanged() {
     if (!mounted) return;
-    setState(() {
-      _action = action;
-    });
+    _load();
+  }
+
+  Future<void> setActionFilter(String action) async {
     await _load();
   }
 
@@ -50,7 +51,7 @@ class HistoryPageState extends State<HistoryPage> {
 
     final rows = await DatabaseService.instance.getCadetHistorySummaries(
       searchQuery: _searchController.text,
-      action: _action,
+      action: 'all',
       limit: 300,
     );
 
@@ -110,24 +111,6 @@ class HistoryPageState extends State<HistoryPage> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: 'all', label: Text('All')),
-                      ButtonSegment(value: 'give', label: Text('Given')),
-                      ButtonSegment(value: 'collect', label: Text('Collected')),
-                    ],
-                    selected: {_action},
-                    onSelectionChanged: (selection) {
-                      setState(() {
-                        _action = selection.first;
-                      });
-                      _load();
-                    },
-                  ),
-                ),
-                const SizedBox(height: 12),
                 Expanded(
                   child: Card(
                     clipBehavior: Clip.antiAlias,
@@ -135,65 +118,150 @@ class HistoryPageState extends State<HistoryPage> {
                         ? const Center(child: CircularProgressIndicator())
                         : _rows.isEmpty
                             ? const Center(child: Text('No cadet history found.'))
-                            : ListView.separated(
-                                padding: const EdgeInsets.all(12),
-                                itemCount: _rows.length,
-                                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                                itemBuilder: (context, index) {
-                                  final row = _rows[index];
-                                  return InkWell(
-                                    borderRadius: BorderRadius.circular(14),
-                                    onTap: () => _openCadetDetail(row),
-                                    child: Container(
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFF8FAFC),
-                                        borderRadius: BorderRadius.circular(14),
-                                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                            : Column(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFFE2E8F0),
+                                      border: Border(
+                                        bottom: BorderSide(color: Color(0xFFCBD5E1)),
                                       ),
-                                      child: Row(
-                                        children: [
-                                          const CircleAvatar(
-                                            radius: 22,
-                                            backgroundColor: Color(0xFFDBEAFE),
-                                            child: Icon(Icons.person),
+                                    ),
+                                    child: const Row(
+                                      children: [
+                                        Expanded(
+                                          flex: 4,
+                                          child: Text(
+                                            'Name/ID',
+                                            style: TextStyle(fontWeight: FontWeight.w700),
                                           ),
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                        ),
+                                        Expanded(
+                                          flex: 2,
+                                          child: Text(
+                                            'Give',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(fontWeight: FontWeight.w700),
+                                          ),
+                                        ),
+                                        Expanded(
+                                          flex: 2,
+                                          child: Text(
+                                            'Collect',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(fontWeight: FontWeight.w700),
+                                          ),
+                                        ),
+                                        Expanded(
+                                          flex: 2,
+                                          child: Text(
+                                            'Holdings',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(fontWeight: FontWeight.w700),
+                                          ),
+                                        ),
+                                        Expanded(
+                                          flex: 3,
+                                          child: Text(
+                                            'Recent Date & Time',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(fontWeight: FontWeight.w700),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: ListView.separated(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                      itemCount: _rows.length,
+                                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                                      itemBuilder: (context, index) {
+                                        final row = _rows[index];
+                                        final holdings = row.totalGiven - row.totalCollected;
+                                        final gaveLast = row.lastAction == 'give';
+                                        final collectedLast = row.lastAction == 'collect';
+                                        return InkWell(
+                                          borderRadius: BorderRadius.circular(12),
+                                          onTap: () => _openCadetDetail(row),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFF8FAFC),
+                                              borderRadius: BorderRadius.circular(12),
+                                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                                            ),
+                                            child: Row(
                                               children: [
-                                                Text(
-                                                  row.cadetName,
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.w700,
+                                                Expanded(
+                                                  flex: 4,
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Text(
+                                                        row.cadetName,
+                                                        style: const TextStyle(
+                                                          fontSize: 16,
+                                                          fontWeight: FontWeight.w700,
+                                                        ),
+                                                      ),
+                                                      Text(
+                                                        row.cadetCode,
+                                                        style: const TextStyle(color: Color(0xFF475569)),
+                                                      ),
+                                                    ],
                                                   ),
                                                 ),
-                                                Text('Cadet ID: ${row.cadetCode}'),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  'Issued: ${row.totalGiven} | Returned: ${row.totalCollected} | Holding: ${row.totalGiven - row.totalCollected}',
-                                                  style: const TextStyle(
-                                                    color: Color(0xFF334155),
-                                                    fontWeight: FontWeight.w600,
+                                                Expanded(
+                                                  flex: 2,
+                                                  child: Text(
+                                                    '${row.totalGiven}',
+                                                    textAlign: TextAlign.center,
+                                                    style: TextStyle(
+                                                      fontWeight: gaveLast ? FontWeight.w800 : FontWeight.w600,
+                                                    ),
                                                   ),
                                                 ),
-                                                const SizedBox(height: 2),
-                                                Text(
-                                                  row.lastActivityMillis == 0
-                                                      ? 'No activity yet'
-                                                      : 'Last Activity: ${_formatDateTime(DateTime.fromMillisecondsSinceEpoch(row.lastActivityMillis))}',
+                                                Expanded(
+                                                  flex: 2,
+                                                  child: Text(
+                                                    '${row.totalCollected}',
+                                                    textAlign: TextAlign.center,
+                                                    style: TextStyle(
+                                                      fontWeight: collectedLast ? FontWeight.w800 : FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  flex: 2,
+                                                  child: Text(
+                                                    '$holdings',
+                                                    textAlign: TextAlign.center,
+                                                    style: const TextStyle(fontWeight: FontWeight.w600),
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  flex: 3,
+                                                  child: Text(
+                                                    row.lastActivityMillis == 0
+                                                        ? '-'
+                                                        : _formatDateTime(
+                                                            DateTime.fromMillisecondsSinceEpoch(
+                                                              row.lastActivityMillis,
+                                                            ),
+                                                          ),
+                                                    textAlign: TextAlign.center,
+                                                  ),
                                                 ),
                                               ],
                                             ),
                                           ),
-                                          const Icon(Icons.chevron_right),
-                                        ],
-                                      ),
+                                        );
+                                      },
                                     ),
-                                  );
-                                },
+                                  ),
+                                ],
                               ),
                   ),
                 ),

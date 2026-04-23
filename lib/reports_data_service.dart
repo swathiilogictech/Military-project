@@ -262,6 +262,7 @@ class ReportsDataService {
         await txn.insert('transfers', row);
       }
     });
+    DatabaseService.instance.notifyDataChanged();
 
     return ImportResult(
       cadets: cadets.length,

@@ -25,6 +25,18 @@ class _CadetDetailPageState extends State<CadetDetailPage> {
   @override
   void initState() {
     super.initState();
+    DatabaseService.instance.dataVersion.addListener(_handleDataChanged);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    DatabaseService.instance.dataVersion.removeListener(_handleDataChanged);
+    super.dispose();
+  }
+
+  void _handleDataChanged() {
+    if (!mounted) return;
     _load();
   }
 

@@ -10,6 +10,14 @@ class DatabaseService {
   static final DatabaseService instance = DatabaseService._();
   static Database? _database;
   static bool _isFactoryInitialized = false;
+  final ValueNotifier<int> dataVersion = ValueNotifier<int>(0);
+  AppUser? _currentUser;
+
+  AppUser? get currentUser => _currentUser;
+
+  void notifyDataChanged() {
+    dataVersion.value++;
+  }
 
   int? firstIntValue(List<Map<String, Object?>> rows) {
     return Sqflite.firstIntValue(rows);
@@ -57,7 +65,7 @@ class DatabaseService {
     return databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 5,
+        version: 6,
         onCreate: (db, version) async {
           await _createSchema(db);
         },
@@ -74,6 +82,13 @@ class DatabaseService {
           if (oldVersion < 5) {
             await _createTransferTables(db);
           }
+          if (oldVersion < 6) {
+            await db.execute("ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''");
+            await db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'staff'");
+            await db.execute("ALTER TABLE users ADD COLUMN can_manage_inventory INTEGER NOT NULL DEFAULT 1");
+            await db.execute("ALTER TABLE users ADD COLUMN can_cadet_import_export INTEGER NOT NULL DEFAULT 0");
+            await db.execute("ALTER TABLE users ADD COLUMN can_view_collected_inventory INTEGER NOT NULL DEFAULT 0");
+          }
         },
         onOpen: (db) async {
           await _seedDefaultUser(db);
@@ -89,7 +104,12 @@ class DatabaseService {
       CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT NOT NULL UNIQUE,
-        password TEXT NOT NULL
+        password TEXT NOT NULL,
+        full_name TEXT NOT NULL DEFAULT '',
+        role TEXT NOT NULL DEFAULT 'staff',
+        can_manage_inventory INTEGER NOT NULL DEFAULT 1,
+        can_cadet_import_export INTEGER NOT NULL DEFAULT 0,
+        can_view_collected_inventory INTEGER NOT NULL DEFAULT 0
       )
     ''');
     await _createInventoryTables(db);
@@ -170,8 +190,26 @@ class DatabaseService {
       await db.insert('users', {
         'username': 'admin',
         'password': '123',
+        'full_name': 'Administrator',
+        'role': 'admin',
+        'can_manage_inventory': 1,
+        'can_cadet_import_export': 1,
+        'can_view_collected_inventory': 1,
       });
+      return;
     }
+
+    await db.update(
+      'users',
+      {
+        'role': 'admin',
+        'can_manage_inventory': 1,
+        'can_cadet_import_export': 1,
+        'can_view_collected_inventory': 1,
+      },
+      where: 'username = ?',
+      whereArgs: ['admin'],
+    );
   }
 
   Future<void> _seedInventory(Database db) async {
@@ -370,6 +408,14 @@ class DatabaseService {
     required String username,
     required String password,
   }) async {
+    final user = await authenticateUser(username: username, password: password);
+    return user != null;
+  }
+
+  Future<AppUser?> authenticateUser({
+    required String username,
+    required String password,
+  }) async {
     final db = await database;
     final users = await db.query(
       'users',
@@ -377,8 +423,114 @@ class DatabaseService {
       whereArgs: [username, password],
       limit: 1,
     );
+    if (users.isEmpty) return null;
+    _currentUser = _appUserFromRow(users.first);
+    return _currentUser;
+  }
 
-    return users.isNotEmpty;
+  void logoutUser() {
+    _currentUser = null;
+  }
+
+  Future<void> updateCurrentUserProfile({
+    required String fullName,
+    String? password,
+  }) async {
+    final user = _currentUser;
+    if (user == null) return;
+    final db = await database;
+    final values = <String, Object?>{
+      'full_name': fullName.trim(),
+    };
+    if (password != null && password.trim().isNotEmpty) {
+      values['password'] = password;
+    }
+    await db.update(
+      'users',
+      values,
+      where: 'id = ?',
+      whereArgs: [user.id],
+    );
+    _currentUser = user.copyWith(
+      fullName: fullName.trim(),
+      password: (password != null && password.trim().isNotEmpty) ? password : user.password,
+    );
+  }
+
+  Future<List<AppUser>> getStaffUsers() async {
+    final db = await database;
+    final rows = await db.query(
+      'users',
+      where: 'role = ?',
+      whereArgs: ['staff'],
+      orderBy: 'username COLLATE NOCASE',
+    );
+    return rows.map(_appUserFromRow).toList();
+  }
+
+  Future<void> createStaffUser({
+    required String username,
+    required String password,
+    required String fullName,
+    required bool canManageInventory,
+    required bool canCadetImportExport,
+    required bool canViewCollectedInventory,
+  }) async {
+    final db = await database;
+    await db.insert('users', {
+      'username': username.trim(),
+      'password': password,
+      'full_name': fullName.trim(),
+      'role': 'staff',
+      'can_manage_inventory': canManageInventory ? 1 : 0,
+      'can_cadet_import_export': canCadetImportExport ? 1 : 0,
+      'can_view_collected_inventory': canViewCollectedInventory ? 1 : 0,
+    });
+  }
+
+  Future<void> updateStaffPermissions({
+    required int userId,
+    required bool canManageInventory,
+    required bool canCadetImportExport,
+    required bool canViewCollectedInventory,
+  }) async {
+    final db = await database;
+    await db.update(
+      'users',
+      {
+        'can_manage_inventory': canManageInventory ? 1 : 0,
+        'can_cadet_import_export': canCadetImportExport ? 1 : 0,
+        'can_view_collected_inventory': canViewCollectedInventory ? 1 : 0,
+      },
+      where: 'id = ? AND role = ?',
+      whereArgs: [userId, 'staff'],
+    );
+  }
+
+  Future<void> resetStaffPassword({
+    required int userId,
+    required String newPassword,
+  }) async {
+    final db = await database;
+    await db.update(
+      'users',
+      {'password': newPassword},
+      where: 'id = ? AND role = ?',
+      whereArgs: [userId, 'staff'],
+    );
+  }
+
+  AppUser _appUserFromRow(Map<String, Object?> row) {
+    return AppUser(
+      id: row['id'] as int,
+      username: row['username'] as String,
+      password: row['password'] as String,
+      fullName: (row['full_name'] as String?) ?? '',
+      role: (row['role'] as String?) ?? 'staff',
+      canManageInventory: ((row['can_manage_inventory'] as int?) ?? 1) == 1,
+      canCadetImportExport: ((row['can_cadet_import_export'] as int?) ?? 0) == 1,
+      canViewCollectedInventory: ((row['can_view_collected_inventory'] as int?) ?? 0) == 1,
+    );
   }
 
   Future<DashboardCounts> getDashboardCounts() async {
@@ -442,7 +594,9 @@ class DatabaseService {
 
   Future<int> addBatch(String name) async {
     final db = await database;
-    return db.insert('batches', {'name': name.trim()});
+    final id = await db.insert('batches', {'name': name.trim()});
+    notifyDataChanged();
+    return id;
   }
 
   Future<void> renameBatch({
@@ -456,6 +610,7 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [batchId],
     );
+    notifyDataChanged();
   }
 
   Future<int> addBox({
@@ -463,10 +618,12 @@ class DatabaseService {
     required String name,
   }) async {
     final db = await database;
-    return db.insert('boxes', {
+    final id = await db.insert('boxes', {
       'batch_id': batchId,
       'name': name.trim(),
     });
+    notifyDataChanged();
+    return id;
   }
 
   Future<void> renameBox({
@@ -480,6 +637,7 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [boxId],
     );
+    notifyDataChanged();
   }
 
   Future<List<ItemRecord>> getItemsForBox(
@@ -538,6 +696,7 @@ class DatabaseService {
       'image_key': imageKey,
       'image_data': imageData,
     });
+    notifyDataChanged();
   }
 
   Future<void> updateItem({
@@ -559,6 +718,7 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [itemId],
     );
+    notifyDataChanged();
   }
 
   Future<List<CadetRecord>> getCadets({String searchQuery = ''}) async {
@@ -716,7 +876,17 @@ class DatabaseService {
         c.photo_data AS cadet_photo,
         COALESCE(SUM(CASE WHEN t.action = 'give' THEN t.quantity ELSE 0 END), 0) AS total_given,
         COALESCE(SUM(CASE WHEN t.action = 'collect' THEN t.quantity ELSE 0 END), 0) AS total_collected,
-        COALESCE(MAX(t.created_at), 0) AS last_activity_at
+        COALESCE(MAX(t.created_at), 0) AS last_activity_at,
+        COALESCE(
+          (
+            SELECT tx.action
+            FROM transfers tx
+            WHERE tx.cadet_id = c.id
+            ORDER BY tx.created_at DESC, tx.id DESC
+            LIMIT 1
+          ),
+          ''
+        ) AS last_action
       FROM cadets c
       LEFT JOIN transfers t ON t.cadet_id = c.id$joinActionClause
       $whereClause
@@ -737,6 +907,7 @@ class DatabaseService {
             totalGiven: row['total_given'] as int,
             totalCollected: row['total_collected'] as int,
             lastActivityMillis: row['last_activity_at'] as int,
+            lastAction: row['last_action'] as String,
           ),
         )
         .toList();
@@ -852,6 +1023,7 @@ class DatabaseService {
         });
       }
     });
+    notifyDataChanged();
   }
 
   Future<void> collectItem({
@@ -925,6 +1097,7 @@ class DatabaseService {
         }
       }
     });
+    notifyDataChanged();
   }
 
   Future<int> addCadet({
@@ -933,11 +1106,13 @@ class DatabaseService {
     String? photoData,
   }) async {
     final db = await database;
-    return db.insert('cadets', {
+    final id = await db.insert('cadets', {
       'cadet_id': cadetId.trim(),
       'name': name.trim(),
       'photo_data': photoData,
     });
+    notifyDataChanged();
+    return id;
   }
 
   Future<void> updateCadet({
@@ -957,7 +1132,9 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [id],
     );
+    notifyDataChanged();
   }
+
   Future<void> deleteCadet({required int id}) async {
     final db = await database;                          
     await db.delete(
@@ -965,6 +1142,7 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [id],
     );
+    notifyDataChanged();
   }
 }
 
@@ -1103,6 +1281,7 @@ class CadetHistorySummary {
     required this.totalGiven,
     required this.totalCollected,
     required this.lastActivityMillis,
+    required this.lastAction,
   });
 
   CadetRecord toCadetRecord() {
@@ -1121,6 +1300,7 @@ class CadetHistorySummary {
   final int totalGiven;
   final int totalCollected;
   final int lastActivityMillis;
+  final String lastAction;
 }
 
 class CadetHoldingRecord {
@@ -1143,4 +1323,50 @@ class CadetHoldingRecord {
   final String boxName;
   final int quantityHeld;
   final int latestTakenAtMillis;
+}
+
+class AppUser {
+  const AppUser({
+    required this.id,
+    required this.username,
+    required this.password,
+    required this.fullName,
+    required this.role,
+    required this.canManageInventory,
+    required this.canCadetImportExport,
+    required this.canViewCollectedInventory,
+  });
+
+  final int id;
+  final String username;
+  final String password;
+  final String fullName;
+  final String role;
+  final bool canManageInventory;
+  final bool canCadetImportExport;
+  final bool canViewCollectedInventory;
+
+  bool get isAdmin => role == 'admin';
+
+  AppUser copyWith({
+    int? id,
+    String? username,
+    String? password,
+    String? fullName,
+    String? role,
+    bool? canManageInventory,
+    bool? canCadetImportExport,
+    bool? canViewCollectedInventory,
+  }) {
+    return AppUser(
+      id: id ?? this.id,
+      username: username ?? this.username,
+      password: password ?? this.password,
+      fullName: fullName ?? this.fullName,
+      role: role ?? this.role,
+      canManageInventory: canManageInventory ?? this.canManageInventory,
+      canCadetImportExport: canCadetImportExport ?? this.canCadetImportExport,
+      canViewCollectedInventory: canViewCollectedInventory ?? this.canViewCollectedInventory,
+    );
+  }
 }
