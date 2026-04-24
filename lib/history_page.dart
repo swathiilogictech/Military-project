@@ -65,7 +65,10 @@ class HistoryPageState extends State<HistoryPage> {
   Future<void> _openCadetDetail(CadetHistorySummary summary) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => CadetDetailPage(cadet: summary.toCadetRecord()),
+        builder: (_) => CadetDetailPage(
+          cadet: summary.toCadetRecord(),
+          showEditAction: false,
+        ),
       ),
     );
     if (!mounted) return;

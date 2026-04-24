@@ -1,13 +1,9 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:excel/excel.dart' as xl;
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
 
 import 'cadet_detail_page.dart';
 import 'cadet_edit_page.dart';
@@ -253,165 +249,6 @@ class InventoryPageState extends State<InventoryPage> {
 
     if (changed == true && mounted) {
       await _loadCadets();
-    }
-  }
-
-  Future<void> _importCadetsFromXlsx() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['xlsx'],
-      withData: true,
-    );
-    if (result == null || result.files.isEmpty) return;
-
-    final bytes = result.files.single.bytes;
-    if (bytes == null || bytes.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to read XLSX file.')),
-      );
-      return;
-    }
-
-    try {
-      final workbook = xl.Excel.decodeBytes(bytes);
-      if (workbook.tables.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No worksheet found in XLSX file.')),
-        );
-        return;
-      }
-
-      final rows = workbook.tables.values.first.rows;
-      if (rows.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('XLSX has no data rows.')),
-        );
-        return;
-      }
-
-      var idCol = 0;
-      var nameCol = 1;
-      var startRow = 0;
-      if (rows.first.length >= 2) {
-        final headers = rows.first.map((c) => _normalizeHeader(_excelCellText(c))).toList();
-        final idIndex = headers.indexWhere((h) => h == 'cadetid' || h == 'id');
-        final nameIndex = headers.indexWhere((h) => h == 'cadetname' || h == 'name');
-        if (idIndex != -1 && nameIndex != -1) {
-          idCol = idIndex;
-          nameCol = nameIndex;
-          startRow = 1;
-        }
-      }
-
-      var added = 0;
-      var skipped = 0;
-      for (var i = startRow; i < rows.length; i++) {
-        final row = rows[i];
-        final cadetId = idCol < row.length ? _excelCellText(row[idCol]) : '';
-        final cadetName = nameCol < row.length ? _excelCellText(row[nameCol]) : '';
-        if (cadetId.isEmpty || cadetName.isEmpty) {
-          skipped++;
-          continue;
-        }
-        try {
-          await DatabaseService.instance.addCadet(cadetId: cadetId, name: cadetName);
-          added++;
-        } catch (_) {
-          skipped++;
-        }
-      }
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Import complete. Added: $added, Skipped: $skipped')),
-      );
-      await _loadCadets();
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid XLSX format.')),
-      );
-    }
-  }
-
-  String _excelCellText(dynamic cell) {
-    final value = cell?.value;
-    return value == null ? '' : value.toString().trim();
-  }
-
-  String _normalizeHeader(String value) {
-    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-  }
-
-  Future<void> _exportCadetTemplateXlsx() async {
-    try {
-      final workbook = xl.Excel.createExcel();
-      final sheet = workbook['Cadets'];
-      sheet.appendRow([
-        xl.TextCellValue('Cadet ID'),
-        xl.TextCellValue('Cadet Name'),
-      ]);
-      sheet.appendRow([
-        xl.TextCellValue('24023100'),
-        xl.TextCellValue('Daniel'),
-      ]);
-
-      final bytes = workbook.encode();
-      if (bytes == null || bytes.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to generate XLSX template.')),
-        );
-        return;
-      }
-
-      if (kIsWeb) {
-        await FilePicker.platform.saveFile(
-          dialogTitle: 'Save XLSX Template',
-          fileName: 'cadet_import_template.xlsx',
-          bytes: Uint8List.fromList(bytes),
-          type: FileType.custom,
-          allowedExtensions: ['xlsx'],
-        );
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Template download started.')),
-        );
-        return;
-      }
-
-      final savePath = await FilePicker.platform.saveFile(
-        dialogTitle: 'Save XLSX Template',
-        fileName: 'cadet_import_template.xlsx',
-        type: FileType.custom,
-        allowedExtensions: ['xlsx'],
-      );
-      if (savePath != null && savePath.isNotEmpty) {
-        await File(savePath).writeAsBytes(Uint8List.fromList(bytes), flush: true);
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Template saved: $savePath')),
-        );
-        return;
-      }
-
-      final fallbackDir = await getApplicationDocumentsDirectory();
-      final fallbackPath =
-          '${fallbackDir.path}${Platform.pathSeparator}cadet_import_template.xlsx';
-      await File(fallbackPath).writeAsBytes(Uint8List.fromList(bytes), flush: true);
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Template saved: $fallbackPath')),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to export XLSX template.')),
-      );
     }
   }
 
@@ -992,71 +829,93 @@ class InventoryPageState extends State<InventoryPage> {
     final selectedBatch = _selectedBatch;
     final selectedBox = _selectedBox;
 
-    await showModalBottomSheet<void>(
+    await showDialog<void>(
       context: context,
-      showDragHandle: true,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Inventory Actions'),
+          content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ListTile(
-                leading: const Icon(Icons.add_box_outlined),
-                title: const Text('Add Item'),
-                enabled: selectedBox != null,
-                onTap: selectedBox == null
-                    ? null
-                    : () {
-                        Navigator.of(context).pop();
-                        _showAddItemDialog();
-                      },
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Batch', style: TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                  IconButton(
+                    tooltip: 'Edit Batch',
+                    icon: const Icon(Icons.drive_file_rename_outline),
+                    onPressed: selectedBatch == null
+                        ? null
+                        : () {
+                            Navigator.of(dialogContext).pop();
+                            _showRenameBatchDialog(selectedBatch);
+                          },
+                  ),
+                  IconButton(
+                    tooltip: 'Add Batch',
+                    icon: const Icon(Icons.add_circle_outline),
+                    onPressed: () {
+                      Navigator.of(dialogContext).pop();
+                      _showAddBatchDialog();
+                    },
+                  ),
+                ],
               ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.playlist_add),
-                title: const Text('Add Batch'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _showAddBatchDialog();
-                },
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Box', style: TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                  IconButton(
+                    tooltip: 'Edit Box',
+                    icon: const Icon(Icons.drive_file_rename_outline),
+                    onPressed: selectedBox == null
+                        ? null
+                        : () {
+                            Navigator.of(dialogContext).pop();
+                            _showRenameBoxDialog(selectedBox);
+                          },
+                  ),
+                  IconButton(
+                    tooltip: 'Add Box',
+                    icon: const Icon(Icons.add_circle_outline),
+                    onPressed: selectedBatch == null
+                        ? null
+                        : () {
+                            Navigator.of(dialogContext).pop();
+                            _showAddBoxDialog();
+                          },
+                  ),
+                ],
               ),
-              ListTile(
-                leading: const Icon(Icons.drive_file_rename_outline),
-                title: const Text('Rename Batch'),
-                enabled: selectedBatch != null,
-                onTap: selectedBatch == null
-                    ? null
-                    : () {
-                        Navigator.of(context).pop();
-                        _showRenameBatchDialog(selectedBatch);
-                      },
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Item', style: TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                  IconButton(
+                    tooltip: 'Add Item',
+                    icon: const Icon(Icons.add_box_outlined),
+                    onPressed: selectedBox == null
+                        ? null
+                        : () {
+                            Navigator.of(dialogContext).pop();
+                            _showAddItemDialog();
+                          },
+                  ),
+                ],
               ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.add_circle_outline),
-                title: const Text('Add Box'),
-                enabled: selectedBatch != null,
-                onTap: selectedBatch == null
-                    ? null
-                    : () {
-                        Navigator.of(context).pop();
-                        _showAddBoxDialog();
-                      },
-              ),
-              ListTile(
-                leading: const Icon(Icons.drive_file_rename_outline),
-                title: const Text('Rename Box'),
-                enabled: selectedBox != null,
-                onTap: selectedBox == null
-                    ? null
-                    : () {
-                        Navigator.of(context).pop();
-                        _showRenameBoxDialog(selectedBox);
-                      },
-              ),
-              const SizedBox(height: 10),
             ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+          ],
         );
       },
     );
@@ -1088,11 +947,7 @@ class InventoryPageState extends State<InventoryPage> {
                   _ModeChip(
                     label: 'Inventory',
                     selected: _inventoryTabSelected,
-                    onTap: () {
-                      setState(() {
-                        _inventoryTabSelected = true;
-                      });
-                    },
+                    onTap: showInventory,
                   ),
                   if (widget.canViewCollectedInventory) ...[
                     const SizedBox(width: 10),
@@ -1135,22 +990,6 @@ class InventoryPageState extends State<InventoryPage> {
                           : Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (widget.canCadetImportExport) ...[
-                              _IconChipButton(
-                                icon: Icons.upload_file_outlined,
-                                selected: false,
-                                tooltip: 'Import XLSX',
-                                onTap: _importCadetsFromXlsx,
-                              ),
-                              const SizedBox(width: 8),
-                              _IconChipButton(
-                                icon: Icons.download_outlined,
-                                selected: false,
-                                tooltip: 'Export XLSX Template',
-                                onTap: _exportCadetTemplateXlsx,
-                              ),
-                              const SizedBox(width: 8),
-                            ],
                             _ModeChip(
                               label: '+Add Cadet',
                               selected: true,
@@ -1163,7 +1002,7 @@ class InventoryPageState extends State<InventoryPage> {
               const SizedBox(height: 16),
               if (_inventoryTabSelected)
                 SizedBox(
-                  height: 56,
+                  height: 68,
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: _batches.length,
@@ -1177,8 +1016,8 @@ class InventoryPageState extends State<InventoryPage> {
                             ? () => _showRenameBatchDialog(batch)
                             : null,
                         child: Container(
-                          constraints: const BoxConstraints(minWidth: 110, maxWidth: 200),
-                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                          constraints: const BoxConstraints(minWidth: 140, maxWidth: 240),
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                           decoration: BoxDecoration(
                             color: isSelected ? const Color(0xFFE7EBFF) : Colors.white,
                             borderRadius: BorderRadius.circular(18),
@@ -1195,6 +1034,7 @@ class InventoryPageState extends State<InventoryPage> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
+                              fontSize: 15,
                               color: isSelected ? const Color(0xFF2F6BFF) : Colors.black87,
                               fontWeight: FontWeight.w600,
                             ),
@@ -1217,16 +1057,16 @@ class InventoryPageState extends State<InventoryPage> {
                           : Row(
                           children: [
                             Container(
-                              width: 86,
+                              width: 114,
                               margin: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
                                 color: const Color(0xFFF3EDF9),
                                 borderRadius: BorderRadius.circular(14),
                               ),
                               child: ListView.separated(
-                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
                                 itemCount: _boxes.length,
-                                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                                separatorBuilder: (_, __) => const SizedBox(height: 14),
                                 itemBuilder: (context, index) {
                                   final box = _boxes[index];
                                   final isSelected = box.id == selectedBox?.id;
@@ -1235,28 +1075,36 @@ class InventoryPageState extends State<InventoryPage> {
                                     onLongPress: widget.canManageInventory
                                         ? () => _showRenameBoxDialog(box)
                                         : null,
-                                    child: Column(
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                                      decoration: BoxDecoration(
+                                        color: isSelected ? const Color(0xFFE7EBFF) : Colors.transparent,
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Column(
                                       children: [
                                         Icon(
                                           Icons.inventory_2_outlined,
+                                          size: 24,
                                           color: isSelected
                                               ? const Color(0xFF6B58F1)
                                               : Colors.black54,
                                         ),
-                                        const SizedBox(height: 4),
+                                        const SizedBox(height: 6),
                                         Text(
                                           box.name,
                                           textAlign: TextAlign.center,
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
-                                            fontSize: 11,
+                                            fontSize: 13,
                                             fontWeight: isSelected
                                                 ? FontWeight.w700
                                                 : FontWeight.w500,
                                           ),
                                         ),
                                       ],
+                                    ),
                                     ),
                                   );
                                 },
@@ -1307,14 +1155,6 @@ class InventoryPageState extends State<InventoryPage> {
                                             );
                                           },
                                         ),
-                                        if (widget.canManageInventory) ...[
-                                          const SizedBox(width: 10),
-                                          _ModeChip(
-                                            label: '+Add Items',
-                                            selected: false,
-                                            onTap: _showAddItemDialog,
-                                          ),
-                                        ],
                                       ],
                                     ),
                                     const SizedBox(height: 14),
@@ -1396,10 +1236,10 @@ class _ItemCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFFE2CCFF),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1419,7 +1259,7 @@ class _ItemCard extends StatelessWidget {
                           : Center(
                               child: Icon(
                                 _iconForImageKey(item.imageKey),
-                                size: 34,
+                                size: 38,
                                 color: const Color(0xFF54406B),
                               ),
                             ),
@@ -1432,26 +1272,26 @@ class _ItemCard extends StatelessWidget {
                           padding: EdgeInsets.zero,
                           visualDensity: VisualDensity.compact,
                           onPressed: onEdit,
-                          icon: const Icon(Icons.edit_outlined, size: 14),
+                          icon: const Icon(Icons.edit_outlined, size: 16),
                         ),
                       ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               item.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12),
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 4),
             Align(
               alignment: Alignment.centerRight,
               child: Text(
                 'x ${item.quantity}',
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
               ),
             ),
           ],

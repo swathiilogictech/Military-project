@@ -12,7 +12,10 @@ class CollectPage extends StatefulWidget {
 class _CollectPageState extends State<CollectPage> {
   CadetRecord? _selectedCadet;
   List<CadetRecord> _cadets = const [];
+  List<CadetHistorySummary> _recentGivenCadets = const [];
   bool _cadetsLoading = true;
+  bool _recentCadetsLoading = true;
+  bool _latestFirst = true;
 
   List<CadetHoldingRecord> _holdings = const [];
   bool _loading = false;
@@ -25,6 +28,7 @@ class _CollectPageState extends State<CollectPage> {
     super.initState();
     DatabaseService.instance.dataVersion.addListener(_handleDataChanged);
     _loadCadets();
+    _loadRecentGivenCadets();
   }
 
   @override
@@ -37,6 +41,7 @@ class _CollectPageState extends State<CollectPage> {
   void _handleDataChanged() {
     if (!mounted) return;
     _loadCadets();
+    _loadRecentGivenCadets();
     if (_selectedCadet != null) {
       _loadForCadet();
     }
@@ -52,6 +57,21 @@ class _CollectPageState extends State<CollectPage> {
       if (_selectedCadet != null) {
         _selectedCadet = rows.where((c) => c.id == _selectedCadet!.id).firstOrNull;
       }
+    });
+  }
+
+  Future<void> _loadRecentGivenCadets() async {
+    setState(() => _recentCadetsLoading = true);
+    final rows = await DatabaseService.instance.getCadetHistorySummaries(
+      action: 'give',
+      limit: 500,
+    );
+    if (!mounted) return;
+    final filtered = rows.where((r) => r.totalGiven > 0).toList();
+    filtered.sort((a, b) => b.lastActivityMillis.compareTo(a.lastActivityMillis));
+    setState(() {
+      _recentGivenCadets = filtered;
+      _recentCadetsLoading = false;
     });
   }
 
@@ -83,14 +103,21 @@ class _CollectPageState extends State<CollectPage> {
       context: context,
       builder: (context) {
         final controller = TextEditingController();
+        var latestFirst = _latestFirst;
         return AlertDialog(
           title: const Text('Select Cadet'),
           content: StatefulBuilder(
             builder: (context, setDialogState) {
               final q = controller.text.trim().toLowerCase();
+              final recentRows = latestFirst
+                  ? _recentGivenCadets
+                  : _recentGivenCadets.reversed.toList(growable: false);
+              final source = recentRows.isNotEmpty
+                  ? recentRows.map((r) => r.toCadetRecord()).toList()
+                  : _cadets;
               final filtered = q.isEmpty
-                  ? _cadets
-                  : _cadets
+                  ? source
+                  : source
                       .where((c) => c.name.toLowerCase().contains(q) || c.cadetId.toLowerCase().contains(q))
                       .toList();
               return SizedBox(
@@ -98,13 +125,30 @@ class _CollectPageState extends State<CollectPage> {
                 height: 420,
                 child: Column(
                   children: [
-                    TextField(
-                      controller: controller,
-                      onChanged: (_) => setDialogState(() {}),
-                      decoration: const InputDecoration(
-                        hintText: 'Search cadets',
-                        prefixIcon: Icon(Icons.search),
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: controller,
+                            onChanged: (_) => setDialogState(() {}),
+                            decoration: const InputDecoration(
+                              hintText: 'Search cadets',
+                              prefixIcon: Icon(Icons.search),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        IconButton(
+                          tooltip: latestFirst ? 'Latest first' : 'Oldest first',
+                          onPressed: () {
+                            setDialogState(() {
+                              latestFirst = !latestFirst;
+                              _latestFirst = latestFirst;
+                            });
+                          },
+                          icon: Icon(latestFirst ? Icons.south : Icons.north),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 8),
                     Expanded(
@@ -113,9 +157,16 @@ class _CollectPageState extends State<CollectPage> {
                         separatorBuilder: (_, __) => const Divider(height: 1),
                         itemBuilder: (context, index) {
                           final cadet = filtered[index];
+                          final summary = _recentGivenCadets
+                              .where((r) => r.cadetDbId == cadet.id)
+                              .firstOrNull;
                           return ListTile(
                             title: Text(cadet.name),
-                            subtitle: Text('ID: ${cadet.cadetId}'),
+                            subtitle: Text(
+                              summary == null
+                                  ? 'ID: ${cadet.cadetId}'
+                                  : 'ID: ${cadet.cadetId} - Last: ${_formatDateTime(DateTime.fromMillisecondsSinceEpoch(summary.lastActivityMillis))}',
+                            ),
                             trailing: _selectedCadet?.id == cadet.id
                                 ? const Icon(Icons.check_circle, color: Color(0xFF0F766E))
                                 : null,
@@ -207,12 +258,14 @@ class _CollectPageState extends State<CollectPage> {
       await DatabaseService.instance.collectItems(cadetDbId: cadet.id, items: inputs);
       if (!mounted) return;
       setState(() {
+        _selectedCadet = null;
+        _holdings = const [];
         _splits.clear();
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Collection saved at ${_formatDateTime(DateTime.now())}')),
       );
-      await _loadForCadet();
+      await _loadRecentGivenCadets();
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -230,7 +283,6 @@ class _CollectPageState extends State<CollectPage> {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    final isWide = width >= 920;
 
     return SafeArea(
       child: Padding(
@@ -250,152 +302,164 @@ class _CollectPageState extends State<CollectPage> {
 
   Widget _buildTakenPane() {
     final cadet = _selectedCadet;
+    final totalHeld = _holdings.fold<int>(0, (sum, h) => sum + h.quantityHeld);
+    final totalSelected = _splits.values.fold<int>(0, (sum, s) => sum + s.total);
+
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    height: 46,
+                    width: 46,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFE2E8F0),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.person_outline, color: Color(0xFF334155)),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          cadet == null ? 'No cadet selected' : cadet.name,
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          cadet == null ? 'Choose a cadet to collect items' : 'ID: ${cadet.cadetId}',
+                          style: const TextStyle(color: Color(0xFF475569)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: _cadetsLoading || _recentCadetsLoading ? null : _openCadetPicker,
+                    icon: const Icon(Icons.groups_2_outlined),
+                    label: Text(cadet == null ? 'Select' : 'Change'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
             Row(
               children: [
-                Expanded(
-                  child: Text(
-                    cadet == null ? 'No cadet selected' : '${cadet.name} (${cadet.cadetId})',
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                  ),
+                const Text(
+                  'Cadet Items',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                 ),
-                FilledButton.tonal(
-                  onPressed: _cadetsLoading ? null : _openCadetPicker,
-                  child: const Text('Select'),
+                const Spacer(),
+                Text(
+                  'Held: $totalHeld',
+                  style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF334155)),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             TextField(
+              enabled: cadet != null,
               controller: _holdingSearchController,
               onChanged: (_) => setState(() {}),
               decoration: const InputDecoration(
-                hintText: 'Search items',
+                hintText: 'Search cadet items',
                 prefixIcon: Icon(Icons.search),
               ),
             ),
             const SizedBox(height: 8),
             Expanded(
-              child: _filteredHoldings.isEmpty
-                  ? const Center(child: Text('No items currently with cadet.'))
+              child: cadet == null
+                  ? const Center(
+                      child: Text(
+                        'Select a cadet to view and collect items.',
+                        style: TextStyle(color: Color(0xFF64748B)),
+                      ),
+                    )
+                  : _filteredHoldings.isEmpty
+                      ? const Center(child: Text('No items currently with this cadet.'))
                   : Column(
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE2E8F0),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Row(
-                            children: [
-                              Expanded(
-                                flex: 3,
-                                child: Text('Item', style: TextStyle(fontWeight: FontWeight.w700)),
-                              ),
-                              Expanded(
-                                flex: 1,
-                                child: Text('Held', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700)),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text('Good', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF16A34A))),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text('Damaged', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFFD97706))),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text('Missing', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFFDC2626))),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text('Given At', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700)),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 8),
                         Expanded(
                           child: ListView.separated(
                             itemCount: _filteredHoldings.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            separatorBuilder: (_, __) => const SizedBox(height: 8),
                             itemBuilder: (context, i) {
                               final h = _filteredHoldings[i];
                               final s = _splits[h.itemId] ?? const _ReturnSplit();
                               return Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
                                   color: const Color(0xFFF8FAFC),
-                                  borderRadius: BorderRadius.circular(8),
+                                  borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: const Color(0xFFE2E8F0)),
                                 ),
-                                child: Row(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Expanded(
-                                      flex: 3,
-                                      child: Text(
-                                        h.itemName,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(fontWeight: FontWeight.w600),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      flex: 1,
-                                      child: Text(
-                                        '${h.quantityHeld}',
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(fontWeight: FontWeight.w700),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      flex: 2,
-                                      child: _QtyStepper(
-                                        value: s.good,
-                                        onMinus: () => _adjustSplit(h, 'good', -1),
-                                        onPlus: () => _adjustSplit(h, 'good', 1),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      flex: 2,
-                                      child: _QtyStepper(
-                                        value: s.damaged,
-                                        onMinus: () => _adjustSplit(h, 'damaged', -1),
-                                        onPlus: () => _adjustSplit(h, 'damaged', 1),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      flex: 2,
-                                      child: _QtyStepper(
-                                        value: s.missing,
-                                        onMinus: () => _adjustSplit(h, 'missing', -1),
-                                        onPlus: () => _adjustSplit(h, 'missing', 1),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      flex: 2,
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            _dateOnly(DateTime.fromMillisecondsSinceEpoch(h.latestTakenAtMillis)),
-                                            textAlign: TextAlign.center,
-                                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            h.itemName,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 15,
+                                            ),
                                           ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            _timeOnly(DateTime.fromMillisecondsSinceEpoch(h.latestTakenAtMillis)),
-                                            textAlign: TextAlign.center,
-                                            style: const TextStyle(fontSize: 11, color: Color(0xFF475569)),
+                                        ),
+                                        Text(
+                                          'Held: ${h.quantityHeld}',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF0F172A),
                                           ),
-                                        ],
-                                      ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      'Given: ${_formatDateTime(DateTime.fromMillisecondsSinceEpoch(h.latestTakenAtMillis))}',
+                                      style: const TextStyle(fontSize: 12, color: Color(0xFF475569)),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        _StatusStepper(
+                                          label: 'Good',
+                                          color: const Color(0xFF16A34A),
+                                          value: s.good,
+                                          onMinus: () => _adjustSplit(h, 'good', -1),
+                                          onPlus: () => _adjustSplit(h, 'good', 1),
+                                        ),
+                                        _StatusStepper(
+                                          label: 'Damaged',
+                                          color: const Color(0xFFD97706),
+                                          value: s.damaged,
+                                          onMinus: () => _adjustSplit(h, 'damaged', -1),
+                                          onPlus: () => _adjustSplit(h, 'damaged', 1),
+                                        ),
+                                        _StatusStepper(
+                                          label: 'Missing',
+                                          color: const Color(0xFFDC2626),
+                                          value: s.missing,
+                                          onMinus: () => _adjustSplit(h, 'missing', -1),
+                                          onPlus: () => _adjustSplit(h, 'missing', 1),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
@@ -406,15 +470,19 @@ class _CollectPageState extends State<CollectPage> {
                       ],
                     ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Row(
               children: [
                 Text(
-                  'Total selected: ${_splits.values.fold<int>(0, (sum, s) => sum + s.total)}',
+                  'Total selected: $totalSelected',
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
                 const Spacer(),
-                FilledButton(onPressed: _collectSelected, child: const Text('Collect')),
+                FilledButton.icon(
+                  onPressed: cadet == null ? null : _collectSelected,
+                  icon: const Icon(Icons.inventory_2_outlined),
+                  label: const Text('Collect'),
+                ),
               ],
             ),
           ],
@@ -442,43 +510,58 @@ class _ReturnSplit {
   }
 }
 
-class _QtyStepper extends StatelessWidget {
-  const _QtyStepper({
+class _StatusStepper extends StatelessWidget {
+  const _StatusStepper({
+    required this.label,
+    required this.color,
     required this.value,
     required this.onMinus,
     required this.onPlus,
   });
 
+  final String label;
+  final Color color;
   final int value;
   final VoidCallback onMinus;
   final VoidCallback onPlus;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        IconButton(
-          visualDensity: VisualDensity.compact,
-          constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-          onPressed: onMinus,
-          icon: const Icon(Icons.remove_circle_outline, size: 18),
-        ),
-        SizedBox(
-          width: 20,
-          child: Text(
-            '$value',
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontWeight: FontWeight.w700),
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            label,
+            style: TextStyle(fontWeight: FontWeight.w700, color: color, fontSize: 12),
           ),
-        ),
-        IconButton(
-          visualDensity: VisualDensity.compact,
-          constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-          onPressed: onPlus,
-          icon: const Icon(Icons.add_circle_outline, size: 18),
-        ),
-      ],
+          const SizedBox(height: 2),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                onPressed: onMinus,
+                icon: const Icon(Icons.remove_circle_outline, size: 18),
+              ),
+              SizedBox(
+                width: 20,
+                child: Text(
+                  '$value',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                onPressed: onPlus,
+                icon: const Icon(Icons.add_circle_outline, size: 18),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -490,17 +573,6 @@ String _formatDateTime(DateTime dt) {
   return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} $hour12:$mm $ampm';
 }
 
-String _dateOnly(DateTime dt) {
-  return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
-}
-
-String _timeOnly(DateTime dt) {
-  final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-  final ampm = dt.hour >= 12 ? 'PM' : 'AM';
-  final mm = dt.minute.toString().padLeft(2, '0');
-  return '$hour12:$mm $ampm';
-}
-
 extension _FirstWhereOrNull<T> on Iterable<T> {
   T? get firstOrNull {
     final iterator = this.iterator;
@@ -508,3 +580,4 @@ extension _FirstWhereOrNull<T> on Iterable<T> {
     return iterator.current;
   }
 }
+

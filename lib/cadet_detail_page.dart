@@ -9,9 +9,11 @@ class CadetDetailPage extends StatefulWidget {
   const CadetDetailPage({
     super.key,
     required this.cadet,
+    this.showEditAction = true,
   });
 
   final CadetRecord cadet;
+  final bool showEditAction;
 
   @override
   State<CadetDetailPage> createState() => _CadetDetailPageState();
@@ -129,21 +131,23 @@ class _CadetDetailPageState extends State<CadetDetailPage> {
                           ),
                           Column(
                             children: [
-                              FilledButton.tonalIcon(
-                                onPressed: () async {
-                                  final updated = await Navigator.of(context).push<bool>(
-                                    MaterialPageRoute(
-                                      builder: (_) => CadetEditPage(cadet: cadet),
-                                    ),
-                                  );
-                                  if (context.mounted && updated == true) {
-                                    Navigator.of(context).pop(true);
-                                  }
-                                },
-                                icon: const Icon(Icons.edit_outlined),
-                                label: const Text('Edit'),
-                              ),
-                              const SizedBox(height: 8),
+                              if (widget.showEditAction) ...[
+                                FilledButton.tonalIcon(
+                                  onPressed: () async {
+                                    final updated = await Navigator.of(context).push<bool>(
+                                      MaterialPageRoute(
+                                        builder: (_) => CadetEditPage(cadet: cadet),
+                                      ),
+                                    );
+                                    if (context.mounted && updated == true) {
+                                      Navigator.of(context).pop(true);
+                                    }
+                                  },
+                                  icon: const Icon(Icons.edit_outlined),
+                                  label: const Text('Edit'),
+                                ),
+                                const SizedBox(height: 8),
+                              ],
                               OutlinedButton.icon(
                                 onPressed: () => Navigator.of(context).pop(),
                                 icon: const Icon(Icons.arrow_back),
