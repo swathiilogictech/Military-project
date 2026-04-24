@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="military_app"
+        android:label="Miltory App"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

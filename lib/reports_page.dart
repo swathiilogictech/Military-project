@@ -1,11 +1,15 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:path_provider/path_provider.dart';
+import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'database_service.dart';
@@ -41,12 +45,14 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
   List<CadetReportRow> _cadetRows = const [];
   List<InventoryReportRow> _inventoryRows = const [];
   List<HistoryReportRow> _historyRows = const [];
+  List<File> _downloadFiles = const [];
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    DatabaseService.instance.dataVersion.addListener(_handleDataChanged);
+    _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
       _loadCurrentTab();
@@ -56,6 +62,7 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
 
   @override
   void dispose() {
+    DatabaseService.instance.dataVersion.removeListener(_handleDataChanged);
     _tabController.dispose();
     _cadetSearchController.dispose();
     _inventorySearchController.dispose();
@@ -65,6 +72,33 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
 
   int? get _fromMillis => _fromDate == null ? null : _startOfDay(_fromDate!).millisecondsSinceEpoch;
   int? get _toMillis => _endOfDay(_toDate).millisecondsSinceEpoch;
+
+  void _handleDataChanged() {
+    if (!mounted) return;
+    _reloadSourcesThenCurrentTab();
+  }
+
+  Future<void> _reloadSourcesThenCurrentTab() async {
+    final batches = await DatabaseService.instance.getBatches();
+    final nextBatchId = batches.any((b) => b.id == _inventoryBatchId)
+        ? _inventoryBatchId
+        : (batches.isEmpty ? null : batches.first.id);
+    final boxes = nextBatchId == null
+        ? const <BoxRecord>[]
+        : await DatabaseService.instance.getBoxesForBatch(nextBatchId);
+    final nextBoxId = boxes.any((b) => b.id == _inventoryBoxId)
+        ? _inventoryBoxId
+        : (boxes.isEmpty ? null : boxes.first.id);
+
+    if (!mounted) return;
+    setState(() {
+      _batches = batches;
+      _inventoryBatchId = nextBatchId;
+      _boxes = boxes;
+      _inventoryBoxId = nextBoxId;
+    });
+    await _loadCurrentTab();
+  }
 
   Future<void> _loadInitial() async {
     setState(() => _loading = true);
@@ -80,52 +114,96 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
       _boxes = boxes;
       _inventoryBoxId = boxes.isEmpty ? null : boxes.first.id;
     });
+    await _refreshDownloads();
     await _loadCurrentTab();
   }
 
   Future<void> _loadCurrentTab() async {
     setState(() => _loading = true);
-    switch (_tabController.index) {
-      case 0:
-        final rows = await ReportsDataService.instance.fetchCadetRows(
-          searchQuery: _cadetSearchController.text,
-          fromMillis: _fromMillis,
-          toMillis: _toMillis,
-        );
-        if (!mounted) return;
-        setState(() {
-          _cadetRows = rows;
-          _loading = false;
-        });
-        break;
-      case 1:
-        final rows = await ReportsDataService.instance.fetchInventoryRows(
-          searchQuery: _inventorySearchController.text,
-          batchId: _inventoryBatchId,
-          boxId: _inventoryBoxId,
-          lowStockOnly: _inventoryLowStockOnly,
-          lowStockThreshold: _inventoryLowStockThreshold,
-        );
-        if (!mounted) return;
-        setState(() {
-          _inventoryRows = rows;
-          _loading = false;
-        });
-        break;
-      default:
-        final rows = await ReportsDataService.instance.fetchHistoryRows(
-          searchQuery: _historySearchController.text,
-          action: _historyAction,
-          status: _historyStatus,
-          fromMillis: _fromMillis,
-          toMillis: _toMillis,
-          limit: 2000,
-        );
-        if (!mounted) return;
-        setState(() {
-          _historyRows = rows;
-          _loading = false;
-        });
+    try {
+      switch (_tabController.index) {
+        case 0:
+          final rows = await ReportsDataService.instance.fetchCadetRows(
+            searchQuery: _cadetSearchController.text,
+            fromMillis: _fromMillis,
+            toMillis: _toMillis,
+          );
+          if (!mounted) return;
+          setState(() {
+            _cadetRows = rows;
+          });
+          break;
+        case 1:
+          final rows = await ReportsDataService.instance.fetchInventoryRows(
+            searchQuery: _inventorySearchController.text,
+            batchId: _inventoryBatchId,
+            boxId: _inventoryBoxId,
+            lowStockOnly: _inventoryLowStockOnly,
+            lowStockThreshold: _inventoryLowStockThreshold,
+          );
+          if (!mounted) return;
+          setState(() {
+            _inventoryRows = rows;
+          });
+          break;
+        case 2:
+          final rows = await ReportsDataService.instance.fetchHistoryRows(
+            searchQuery: _historySearchController.text,
+            action: _historyAction,
+            status: _historyStatus,
+            fromMillis: _fromMillis,
+            toMillis: _toMillis,
+            limit: 2000,
+          );
+          if (!mounted) return;
+          setState(() {
+            _historyRows = rows;
+          });
+          break;
+        default:
+          await _refreshDownloads();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      _toast('Unable to load this tab right now.');
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+      });
+    }
+  }
+
+  Future<Directory> _downloadsDir() async {
+    final base = await getApplicationDocumentsDirectory();
+    final dir = Directory(p.join(base.path, 'report_downloads'));
+    if (!dir.existsSync()) {
+      await dir.create(recursive: true);
+    }
+    return dir;
+  }
+
+  Future<void> _refreshDownloads() async {
+    try {
+      final dir = await _downloadsDir();
+      final files = dir
+          .listSync()
+          .whereType<File>()
+          .where((f) {
+            final ext = p.extension(f.path).toLowerCase();
+            return ext == '.pdf' || ext == '.csv' || ext == '.json';
+          })
+          .toList()
+        ..sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+      if (!mounted) return;
+      setState(() {
+        _downloadFiles = files;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _downloadFiles = const [];
+      });
     }
   }
 
@@ -436,17 +514,30 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
               ])
           .toList(),
     );
-    await Share.shareXFiles(
-      [
-        XFile.fromData(Uint8List.fromList(utf8.encode(cadetCsv)),
-            name: 'all_cadets_$stamp.csv', mimeType: 'text/csv'),
-        XFile.fromData(Uint8List.fromList(utf8.encode(inventoryCsv)),
-            name: 'all_inventory_$stamp.csv', mimeType: 'text/csv'),
-        XFile.fromData(Uint8List.fromList(utf8.encode(historyCsv)),
-            name: 'all_history_$stamp.csv', mimeType: 'text/csv'),
-      ],
-      text: 'All records Excel files',
+    final folderPath = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Select folder to save all records',
     );
+    if (folderPath == null || folderPath.isEmpty) return;
+
+    final cadetName = 'all_cadets_$stamp.csv';
+    final inventoryName = 'all_inventory_$stamp.csv';
+    final historyName = 'all_history_$stamp.csv';
+
+    final cadetPath = p.join(folderPath, cadetName);
+    final inventoryPath = p.join(folderPath, inventoryName);
+    final historyPath = p.join(folderPath, historyName);
+    await File(cadetPath).writeAsBytes(Uint8List.fromList(utf8.encode(cadetCsv)), flush: true);
+    await File(inventoryPath).writeAsBytes(Uint8List.fromList(utf8.encode(inventoryCsv)), flush: true);
+    await File(historyPath).writeAsBytes(Uint8List.fromList(utf8.encode(historyCsv)), flush: true);
+
+    final appDir = await _downloadsDir();
+    await File(p.join(appDir.path, cadetName)).writeAsBytes(Uint8List.fromList(utf8.encode(cadetCsv)), flush: true);
+    await File(p.join(appDir.path, inventoryName))
+        .writeAsBytes(Uint8List.fromList(utf8.encode(inventoryCsv)), flush: true);
+    await File(p.join(appDir.path, historyName)).writeAsBytes(Uint8List.fromList(utf8.encode(historyCsv)), flush: true);
+    await _refreshDownloads();
+
+    _toast('Saved to folder and Downloads tab.');
   }
 
   Future<void> _exportDataPackage() async {
@@ -509,10 +600,21 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
     required String mimeType,
     required String text,
   }) async {
-    await Share.shareXFiles(
-      [XFile.fromData(bytes, name: filename, mimeType: mimeType)],
-      text: text,
+    final folderPath = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Select folder to save $filename',
     );
+    if (folderPath == null || folderPath.isEmpty) return;
+    final selectedPath = p.join(folderPath, filename);
+    await File(selectedPath).writeAsBytes(bytes, flush: true);
+
+    final appDir = await _downloadsDir();
+    final appPath = p.join(appDir.path, filename);
+    await File(appPath).writeAsBytes(bytes, flush: true);
+    await _refreshDownloads();
+
+    final _ = mimeType;
+    final __ = text;
+    _toast('Saved to folder and Downloads tab.');
   }
 
   Future<Uint8List> _buildPdfBytes({
@@ -581,6 +683,7 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         title: const Text('Reports'),
         actions: [
           IconButton(
@@ -600,43 +703,46 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
             Tab(icon: Icon(Icons.groups_2_outlined), text: "Cadet's List"),
             Tab(icon: Icon(Icons.inventory_2_outlined), text: 'Inventory List'),
             Tab(icon: Icon(Icons.history_outlined), text: 'History'),
+            Tab(icon: Icon(Icons.download_done_outlined), text: 'Downloads'),
           ],
         ),
       ),
       body: Column(
         children: [
-          _TopDateFilters(
-            fromDate: _fromDate,
-            toDate: _toDate,
-            onPickFrom: _pickFromDate,
-            onPickTo: _pickToDate,
-            onClearFrom: () async {
-              setState(() => _fromDate = null);
-              await _loadCurrentTab();
-            },
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _showExportChooser(currentTabOnly: true),
-                    icon: const Icon(Icons.download_outlined),
-                    label: const Text('Download This Tab'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: () => _showExportChooser(currentTabOnly: false),
-                    icon: const Icon(Icons.dataset_outlined),
-                    label: const Text('Download All Records'),
-                  ),
-                ),
-              ],
+          if (_tabController.index != 3)
+            _TopDateFilters(
+              fromDate: _fromDate,
+              toDate: _toDate,
+              onPickFrom: _pickFromDate,
+              onPickTo: _pickToDate,
+              onClearFrom: () async {
+                setState(() => _fromDate = null);
+                await _loadCurrentTab();
+              },
             ),
-          ),
+          if (_tabController.index != 3)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showExportChooser(currentTabOnly: true),
+                      icon: const Icon(Icons.download_outlined),
+                      label: const Text('Save This Tab'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => _showExportChooser(currentTabOnly: false),
+                      icon: const Icon(Icons.dataset_outlined),
+                      label: const Text('Save All Records'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
@@ -646,6 +752,7 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
                       _buildCadetTab(),
                       _buildInventoryTab(),
                       _buildHistoryTab(),
+                      _buildDownloadsTab(),
                     ],
                   ),
           ),
@@ -927,6 +1034,149 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDownloadsTab() {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Saved Report Files',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _refreshDownloads,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Refresh'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: Card(
+              child: _downloadFiles.isEmpty
+                  ? const Center(child: Text('No downloaded files yet. Save a report to see files here.'))
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(10),
+                      itemCount: _downloadFiles.length,
+                      separatorBuilder: (_, __) => const Divider(height: 10),
+                      itemBuilder: (context, index) {
+                        final file = _downloadFiles[index];
+                        final stat = file.statSync();
+                        final ext = p.extension(file.path).toLowerCase();
+                        return ListTile(
+                          title: Text(p.basename(file.path)),
+                          subtitle: Text(
+                            '${_formatBytes(stat.size)} • ${_human(stat.modified.millisecondsSinceEpoch)}',
+                          ),
+                          trailing: Wrap(
+                            spacing: 6,
+                            children: [
+                              IconButton(
+                                tooltip: 'View',
+                                onPressed: () => _viewDownload(file),
+                                icon: const Icon(Icons.visibility_outlined),
+                              ),
+                              IconButton(
+                                tooltip: 'Print',
+                                onPressed: ext == '.pdf' ? () => _printDownload(file) : null,
+                                icon: const Icon(Icons.print_outlined),
+                              ),
+                              IconButton(
+                                tooltip: 'Share',
+                                onPressed: () => _shareDownload(file),
+                                icon: const Icon(Icons.share_outlined),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _viewDownload(File file) async {
+    final ext = p.extension(file.path).toLowerCase();
+    if (ext == '.pdf') {
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _PdfPreviewScreen(
+            title: p.basename(file.path),
+            bytes: bytes,
+          ),
+        ),
+      );
+      return;
+    }
+
+    final content = await file.readAsString();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(p.basename(file.path)),
+        content: SizedBox(
+          width: 760,
+          child: SingleChildScrollView(
+            child: SelectableText(content),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _printDownload(File file) async {
+    final bytes = await file.readAsBytes();
+    await Printing.layoutPdf(onLayout: (_) async => bytes);
+  }
+
+  Future<void> _shareDownload(File file) async {
+    await Share.shareXFiles([XFile(file.path)], text: 'Report file');
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+}
+
+class _PdfPreviewScreen extends StatelessWidget {
+  const _PdfPreviewScreen({
+    required this.title,
+    required this.bytes,
+  });
+
+  final String title;
+  final Uint8List bytes;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(title)),
+      body: PdfPreview(
+        build: (_) async => bytes,
+        canChangePageFormat: false,
+        canChangeOrientation: false,
       ),
     );
   }
