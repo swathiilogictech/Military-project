@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:pdf/pdf.dart';
@@ -14,6 +15,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'database_service.dart';
 import 'reports_data_service.dart';
+import 'web_download.dart';
 
 class ReportsPage extends StatefulWidget {
   const ReportsPage({super.key});
@@ -174,7 +176,8 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
     }
   }
 
-  Future<Directory> _downloadsDir() async {
+  Future<Directory?> _downloadsDir() async {
+    if (kIsWeb) return null;
     final base = await getApplicationDocumentsDirectory();
     final dir = Directory(p.join(base.path, 'report_downloads'));
     if (!dir.existsSync()) {
@@ -184,9 +187,14 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
   }
 
   Future<void> _refreshDownloads() async {
+    if (kIsWeb) {
+      if (!mounted) return;
+      setState(() => _downloadFiles = const []);
+      return;
+    }
     try {
       final dir = await _downloadsDir();
-      final files = dir
+      final files = dir!
           .listSync()
           .whereType<File>()
           .where((f) {
@@ -514,30 +522,38 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
               ])
           .toList(),
     );
-    final folderPath = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Select folder to save all records',
-    );
-    if (folderPath == null || folderPath.isEmpty) return;
-
     final cadetName = 'all_cadets_$stamp.csv';
     final inventoryName = 'all_inventory_$stamp.csv';
     final historyName = 'all_history_$stamp.csv';
 
-    final cadetPath = p.join(folderPath, cadetName);
-    final inventoryPath = p.join(folderPath, inventoryName);
-    final historyPath = p.join(folderPath, historyName);
-    await File(cadetPath).writeAsBytes(Uint8List.fromList(utf8.encode(cadetCsv)), flush: true);
-    await File(inventoryPath).writeAsBytes(Uint8List.fromList(utf8.encode(inventoryCsv)), flush: true);
-    await File(historyPath).writeAsBytes(Uint8List.fromList(utf8.encode(historyCsv)), flush: true);
+    if (kIsWeb) {
+      await downloadFileOnWeb(cadetName, utf8.encode(cadetCsv), 'text/csv');
+      await downloadFileOnWeb(inventoryName, utf8.encode(inventoryCsv), 'text/csv');
+      await downloadFileOnWeb(historyName, utf8.encode(historyCsv), 'text/csv');
+      _toast('3 files downloaded.');
+      return;
+    }
 
+    // Write all 3 files to app's internal dir (always writable), then share
     final appDir = await _downloadsDir();
-    await File(p.join(appDir.path, cadetName)).writeAsBytes(Uint8List.fromList(utf8.encode(cadetCsv)), flush: true);
-    await File(p.join(appDir.path, inventoryName))
-        .writeAsBytes(Uint8List.fromList(utf8.encode(inventoryCsv)), flush: true);
-    await File(p.join(appDir.path, historyName)).writeAsBytes(Uint8List.fromList(utf8.encode(historyCsv)), flush: true);
+    final cadetFile = File(p.join(appDir!.path, cadetName));
+    final inventoryFile = File(p.join(appDir.path, inventoryName));
+    final historyFile = File(p.join(appDir.path, historyName));
+
+    await cadetFile.writeAsBytes(Uint8List.fromList(utf8.encode(cadetCsv)), flush: true);
+    await inventoryFile.writeAsBytes(Uint8List.fromList(utf8.encode(inventoryCsv)), flush: true);
+    await historyFile.writeAsBytes(Uint8List.fromList(utf8.encode(historyCsv)), flush: true);
     await _refreshDownloads();
 
-    _toast('Saved to folder and Downloads tab.');
+    await Share.shareXFiles(
+      [
+        XFile(cadetFile.path, mimeType: 'text/csv'),
+        XFile(inventoryFile.path, mimeType: 'text/csv'),
+        XFile(historyFile.path, mimeType: 'text/csv'),
+      ],
+      subject: 'All Records Export',
+      text: 'Cadets, Inventory and History CSV files',
+    );
   }
 
   Future<void> _exportDataPackage() async {
@@ -600,21 +616,24 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
     required String mimeType,
     required String text,
   }) async {
-    final folderPath = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Select folder to save $filename',
-    );
-    if (folderPath == null || folderPath.isEmpty) return;
-    final selectedPath = p.join(folderPath, filename);
-    await File(selectedPath).writeAsBytes(bytes, flush: true);
+    if (kIsWeb) {
+      await downloadFileOnWeb(filename, bytes, mimeType);
+      _toast('Download started: $filename');
+      return;
+    }
 
+    // Save to app's internal downloads dir (always writable, no permission needed)
     final appDir = await _downloadsDir();
-    final appPath = p.join(appDir.path, filename);
+    final appPath = p.join(appDir!.path, filename);
     await File(appPath).writeAsBytes(bytes, flush: true);
     await _refreshDownloads();
 
-    final _ = mimeType;
-    final __ = text;
-    _toast('Saved to folder and Downloads tab.');
+    // Share via Android/iOS share sheet — user can save to Downloads, Drive, etc.
+    await Share.shareXFiles(
+      [XFile(appPath, mimeType: mimeType)],
+      subject: filename,
+      text: text,
+    );
   }
 
   Future<Uint8List> _buildPdfBytes({
