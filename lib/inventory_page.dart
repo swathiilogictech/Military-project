@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:excel/excel.dart' as xl;
@@ -7,7 +6,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
 
 import 'cadet_detail_page.dart';
 import 'cadet_edit_page.dart';
@@ -386,28 +384,23 @@ class InventoryPageState extends State<InventoryPage> {
       final savePath = await FilePicker.platform.saveFile(
         dialogTitle: 'Save XLSX Template',
         fileName: 'cadet_import_template.xlsx',
+        bytes: Uint8List.fromList(bytes),
         type: FileType.custom,
         allowedExtensions: ['xlsx'],
       );
       if (savePath != null && savePath.isNotEmpty) {
-        await File(savePath).writeAsBytes(Uint8List.fromList(bytes), flush: true);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Template saved: $savePath')),
+          const SnackBar(content: Text('Template exported successfully.')),
         );
         return;
       }
-
-      final fallbackDir = await getApplicationDocumentsDirectory();
-      final fallbackPath =
-          '${fallbackDir.path}${Platform.pathSeparator}cadet_import_template.xlsx';
-      await File(fallbackPath).writeAsBytes(Uint8List.fromList(bytes), flush: true);
-
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Template saved: $fallbackPath')),
+        const SnackBar(content: Text('Template export cancelled.')),
       );
-    } catch (_) {
+    } catch (e) {
+      debugPrint('XLSX export failed: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Failed to export XLSX template.')),
