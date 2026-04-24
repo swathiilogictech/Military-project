@@ -534,25 +534,103 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
       return;
     }
 
-    // Write all 3 files to app's internal dir (always writable), then share
+    // Write all 3 files to internal dir first (always writable)
     final appDir = await _downloadsDir();
-    final cadetFile = File(p.join(appDir!.path, cadetName));
-    final inventoryFile = File(p.join(appDir.path, inventoryName));
-    final historyFile = File(p.join(appDir.path, historyName));
+    final cadetBytes = Uint8List.fromList(utf8.encode(cadetCsv));
+    final inventoryBytes = Uint8List.fromList(utf8.encode(inventoryCsv));
+    final historyBytes = Uint8List.fromList(utf8.encode(historyCsv));
 
-    await cadetFile.writeAsBytes(Uint8List.fromList(utf8.encode(cadetCsv)), flush: true);
-    await inventoryFile.writeAsBytes(Uint8List.fromList(utf8.encode(inventoryCsv)), flush: true);
-    await historyFile.writeAsBytes(Uint8List.fromList(utf8.encode(historyCsv)), flush: true);
+    await File(p.join(appDir!.path, cadetName)).writeAsBytes(cadetBytes, flush: true);
+    await File(p.join(appDir.path, inventoryName)).writeAsBytes(inventoryBytes, flush: true);
+    await File(p.join(appDir.path, historyName)).writeAsBytes(historyBytes, flush: true);
     await _refreshDownloads();
 
-    await Share.shareXFiles(
-      [
-        XFile(cadetFile.path, mimeType: 'text/csv'),
-        XFile(inventoryFile.path, mimeType: 'text/csv'),
-        XFile(historyFile.path, mimeType: 'text/csv'),
-      ],
-      subject: 'All Records Export',
-      text: 'Cadets, Inventory and History CSV files',
+    if (!mounted) return;
+
+    // Show custom bottom sheet: Save to Downloads OR Share via other apps
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Title
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text(
+                  'Export 3 files (Cadets, Inventory, History)',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+              ),
+              const Divider(),
+
+              // ── Option 1: Save to Downloads ──────────────────────
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.download_rounded, color: Colors.green),
+                ),
+                title: const Text('Save to Downloads'),
+                subtitle: const Text('Each file saved one by one'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  for (final entry in [
+                    (cadetName, cadetBytes),
+                    (inventoryName, inventoryBytes),
+                    (historyName, historyBytes),
+                  ]) {
+                    await FilePicker.platform.saveFile(
+                      dialogTitle: 'Save ${entry.$1}',
+                      fileName: entry.$1,
+                      bytes: entry.$2,
+                    );
+                  }
+                  if (!mounted) return;
+                  _toast('All 3 files saved.');
+                },
+              ),
+
+              // ── Option 2: Share via other apps ────────────────────
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.share_rounded, color: Colors.blue),
+                ),
+                title: const Text('Share via other apps'),
+                subtitle: const Text('WhatsApp, Gmail, Drive and more'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await Share.shareXFiles(
+                    [
+                      XFile(p.join(appDir.path, cadetName), mimeType: 'text/csv'),
+                      XFile(p.join(appDir.path, inventoryName), mimeType: 'text/csv'),
+                      XFile(p.join(appDir.path, historyName), mimeType: 'text/csv'),
+                    ],
+                    subject: 'All Records Export',
+                    text: 'Cadets, Inventory and History CSV files',
+                  );
+                },
+              ),
+
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -610,6 +688,7 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
     await _loadInitial();
   }
 
+  /// Shows a bottom sheet with "Save to Downloads" first, then "Share via apps".
   Future<void> _shareBytes({
     required Uint8List bytes,
     required String filename,
@@ -622,17 +701,96 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
       return;
     }
 
-    // Save to app's internal downloads dir (always writable, no permission needed)
+    // Save a copy to internal dir so Downloads tab always works
     final appDir = await _downloadsDir();
     final appPath = p.join(appDir!.path, filename);
     await File(appPath).writeAsBytes(bytes, flush: true);
     await _refreshDownloads();
 
-    // Share via Android/iOS share sheet — user can save to Downloads, Drive, etc.
-    await Share.shareXFiles(
-      [XFile(appPath, mimeType: mimeType)],
-      subject: filename,
-      text: text,
+    if (!mounted) return;
+
+    // Show custom bottom sheet: Save to Downloads OR Share via other apps
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Title
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text(
+                  filename,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const Divider(),
+
+              // ── Option 1: Save to Downloads ──────────────────────
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.download_rounded, color: Colors.green),
+                ),
+                title: const Text('Save to Downloads'),
+                subtitle: const Text('Pick a folder on your device'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  // Opens Android's native file-save dialog (SAF)
+                  // defaults to Downloads folder
+                  final savedPath = await FilePicker.platform.saveFile(
+                    dialogTitle: 'Save $filename',
+                    fileName: filename,
+                    bytes: bytes,
+                  );
+                  if (!mounted) return;
+                  if (savedPath != null) {
+                    _toast('Saved to Downloads.');
+                  } else {
+                    _toast('Save cancelled.');
+                  }
+                },
+              ),
+
+              // ── Option 2: Share via other apps ────────────────────
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.share_rounded, color: Colors.blue),
+                ),
+                title: const Text('Share via other apps'),
+                subtitle: const Text('WhatsApp, Gmail, Drive and more'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  // Opens Android/iOS system share sheet
+                  await Share.shareXFiles(
+                    [XFile(appPath, mimeType: mimeType)],
+                    subject: filename,
+                    text: text,
+                  );
+                },
+              ),
+
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
