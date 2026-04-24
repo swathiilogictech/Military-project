@@ -646,46 +646,186 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
   }
 
   Future<void> _importDataPackage() async {
+    // ── Step 1: Pick the .json file ────────────────────────────────────────
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['json'],
       withData: true,
     );
     if (result == null || result.files.isEmpty) return;
+
     final bytes = result.files.single.bytes;
     if (bytes == null || bytes.isEmpty) {
-      _toast('Unable to read file bytes.');
+      _toast('Unable to read file.');
       return;
     }
 
-    final decoded = jsonDecode(utf8.decode(bytes));
-    if (decoded is! Map<String, dynamic>) {
-      _toast('Invalid package format.');
+    // ── Step 2: Decode & validate ──────────────────────────────────────────
+    Map<String, dynamic> decoded;
+    try {
+      final raw = jsonDecode(utf8.decode(bytes));
+      if (raw is! Map<String, dynamic>) throw const FormatException('Not a JSON object');
+      decoded = raw;
+    } catch (_) {
+      _toast('Invalid package format — not a valid military app export.');
       return;
     }
+
+    // Validate it is actually our package (must have schema key)
+    final schema = decoded['schema'] as String?;
+    if (schema != 'military_app_package_v1') {
+      _toast('Wrong file — this is not a military app export file.');
+      return;
+    }
+
+    // ── Step 3: Show merge preview dialog ─────────────────────────────────
+    final exportedAt = decoded['exported_at'];
+    final exportedDate = exportedAt is int
+        ? DateTime.fromMillisecondsSinceEpoch(exportedAt)
+        : null;
+    final exportedLabel = exportedDate != null
+        ? '${exportedDate.day.toString().padLeft(2,'0')}/'
+          '${exportedDate.month.toString().padLeft(2,'0')}/'
+          '${exportedDate.year}  '
+          '${exportedDate.hour.toString().padLeft(2,'0')}:'
+          '${exportedDate.minute.toString().padLeft(2,'0')}'
+        : 'Unknown time';
+
+    final incomingTransfers = (decoded['transfers'] as List?)?.length ?? 0;
 
     if (!mounted) return;
-    final shouldImport = await showDialog<bool>(
+    final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Import Package'),
-        content: const Text(
-          'This will replace current cadets, inventory and history records in this device. Continue?',
+      builder: (ctx) => AlertDialog(
+        title: const Text('Merge Device Data'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // File info
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    const Icon(Icons.devices, size: 16, color: Colors.blue),
+                    const SizedBox(width: 6),
+                    Text('Exported: $exportedLabel',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text('Contains $incomingTransfers transfer records',
+                      style: const TextStyle(fontSize: 13)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            // What will happen
+            const Text('What will happen:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            _mergeInfoRow(Icons.add_circle_outline, Colors.green,
+                'New transfers from this file will be added'),
+            _mergeInfoRow(Icons.inventory_2_outlined, Colors.orange,
+                'Item stock will be adjusted for each new transfer'),
+            _mergeInfoRow(Icons.copy_outlined, Colors.grey,
+                'Duplicate records will be skipped automatically'),
+            _mergeInfoRow(Icons.shield_outlined, Colors.blue,
+                'Your existing data will NOT be deleted'),
+          ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Import')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            icon: const Icon(Icons.merge_type, size: 18),
+            label: const Text('Merge'),
+            onPressed: () => Navigator.of(ctx).pop(true),
+          ),
         ],
       ),
     );
 
-    if (shouldImport != true) return;
-    final summary = await ReportsDataService.instance.importPortableDataPackage(decoded);
+    if (confirm != true) return;
+
+    // ── Step 4: Run merge ──────────────────────────────────────────────────
     if (!mounted) return;
-    _toast(
-      'Imported successfully: ${summary.cadets} cadets, ${summary.items} items, ${summary.transfers} history rows.',
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('Merging data...'),
+          ],
+        ),
+      ),
     );
+
+    MergeResult summary;
+    try {
+      summary = await ReportsDataService.instance.mergeTransfersFromPackage(decoded);
+    } catch (e) {
+      if (mounted) Navigator.of(context).pop(); // close loading
+      _toast('Merge failed: $e');
+      return;
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).pop(); // close loading dialog
+
+    // ── Step 5: Show result ────────────────────────────────────────────────
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Merge Complete'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.check_circle, color: Colors.green, size: 48),
+            const SizedBox(height: 12),
+            _mergeInfoRow(Icons.add_circle, Colors.green,
+                '${summary.inserted} new transfers added'),
+            _mergeInfoRow(Icons.copy, Colors.grey,
+                '${summary.skipped} duplicates skipped'),
+            if (summary.failed > 0)
+              _mergeInfoRow(Icons.warning_amber, Colors.red,
+                  '${summary.failed} records could not be matched'),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+
     await _loadInitial();
+  }
+
+  /// Small helper row used inside merge dialogs.
+  static Widget _mergeInfoRow(IconData icon, Color color, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 13))),
+        ],
+      ),
+    );
   }
 
   /// Shows a bottom sheet with "Save to Downloads" first, then "Share via apps".
