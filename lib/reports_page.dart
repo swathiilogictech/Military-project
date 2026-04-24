@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:io';
+import 'dart:io' show File, Directory, Platform;
 import 'dart:typed_data';
 
 import 'package:cross_file/cross_file.dart';
@@ -589,14 +589,14 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
                     (inventoryName, inventoryBytes),
                     (historyName, historyBytes),
                   ]) {
-                    await FilePicker.platform.saveFile(
-                      dialogTitle: 'Save ${entry.$1}',
-                      fileName: entry.$1,
+                    await _saveToDownloads(
                       bytes: entry.$2,
+                      filename: entry.$1,
+                      mimeType: 'text/csv',
                     );
                   }
                   if (!mounted) return;
-                  _toast('All 3 files saved.');
+                  _toast('All 3 files saved to Downloads.');
                 },
               ),
 
@@ -828,6 +828,81 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
     );
   }
 
+
+  /// Saves bytes to the device Downloads folder.
+  ///
+  /// Platform behaviour:
+  ///   Web     → triggers browser download via dart:html
+  ///   Android → writes to app external files dir (accessible in Files app,
+  ///             no permission needed on Android 10+), then opens share sheet
+  ///             so user can move/forward the file
+  ///   iOS     → writes to internal docs dir, then shares via share sheet
+  ///   Desktop → uses FilePicker.saveFile() with bytes (works on desktop/web)
+  Future<void> _saveToDownloads({
+    required Uint8List bytes,
+    required String filename,
+    required String mimeType,
+  }) async {
+    if (kIsWeb) {
+      await downloadFileOnWeb(filename, bytes, mimeType);
+      _toast('Download started: $filename');
+      return;
+    }
+
+    if (Platform.isAndroid) {
+      // Write to app-scoped external storage — always writable without
+      // any permission on Android 10+.
+      // Path: /storage/emulated/0/Android/data/<pkg>/files/<filename>
+      // Accessible via the device Files app under "Android/data".
+      final extDir = await getExternalStorageDirectory();
+      if (extDir == null) {
+        // Fallback: internal storage + share
+        await _shareViaSheet(bytes: bytes, filename: filename, mimeType: mimeType);
+        return;
+      }
+      final savePath = p.join(extDir.path, filename);
+      await File(savePath).writeAsBytes(bytes, flush: true);
+      if (!mounted) return;
+      // Also offer share so user can move to WhatsApp, Drive, etc.
+      await Share.shareXFiles(
+        [XFile(savePath, mimeType: mimeType)],
+        subject: filename,
+        text: 'Saved to device. Share or move as needed.',
+      );
+      return;
+    }
+
+    if (Platform.isIOS) {
+      // iOS: write to docs dir, share sheet lets user save to Files app
+      await _shareViaSheet(bytes: bytes, filename: filename, mimeType: mimeType);
+      return;
+    }
+
+    // Desktop (Windows / macOS / Linux): saveFile with bytes works perfectly
+    final savedPath = await FilePicker.platform.saveFile(
+      dialogTitle: 'Save $filename',
+      fileName: filename,
+      bytes: bytes,
+    );
+    if (!mounted) return;
+    _toast(savedPath != null ? 'Saved to $savedPath' : 'Save cancelled.');
+  }
+
+  /// Writes bytes to internal app dir then opens the system share sheet.
+  Future<void> _shareViaSheet({
+    required Uint8List bytes,
+    required String filename,
+    required String mimeType,
+  }) async {
+    final appDir = await _downloadsDir();
+    final appPath = p.join(appDir!.path, filename);
+    await File(appPath).writeAsBytes(bytes, flush: true);
+    await Share.shareXFiles(
+      [XFile(appPath, mimeType: mimeType)],
+      subject: filename,
+    );
+  }
+
   /// Shows a bottom sheet with "Save to Downloads" first, then "Share via apps".
   Future<void> _shareBytes({
     required Uint8List bytes,
@@ -887,19 +962,11 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
                 subtitle: const Text('Pick a folder on your device'),
                 onTap: () async {
                   Navigator.pop(ctx);
-                  // Opens Android's native file-save dialog (SAF)
-                  // defaults to Downloads folder
-                  final savedPath = await FilePicker.platform.saveFile(
-                    dialogTitle: 'Save $filename',
-                    fileName: filename,
+                  await _saveToDownloads(
                     bytes: bytes,
+                    filename: filename,
+                    mimeType: mimeType,
                   );
-                  if (!mounted) return;
-                  if (savedPath != null) {
-                    _toast('Saved to Downloads.');
-                  } else {
-                    _toast('Save cancelled.');
-                  }
                 },
               ),
 
