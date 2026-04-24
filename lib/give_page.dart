@@ -288,7 +288,10 @@ class _GivePageState extends State<GivePage> {
         items: _cart.values.map((e) => TransferInput(itemId: e.item.id, quantity: e.quantity)).toList(),
       );
       if (!mounted) return;
-      setState(() => _cart.clear());
+      setState(() {
+        _cart.clear();
+        _selectedCadet = null; // ← clear cadet panel after successful Give
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Given to ${cadet.name} at ${_formatDateTime(DateTime.now())}')),
       );

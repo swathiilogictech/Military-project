@@ -1,9 +1,10 @@
 import 'dart:convert';
-import 'dart:io';
+import 'dart:io' show File, Directory, Platform;
 import 'dart:typed_data';
 
 import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:pdf/pdf.dart';
@@ -14,6 +15,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'database_service.dart';
 import 'reports_data_service.dart';
+import 'web_download.dart';
 
 class ReportsPage extends StatefulWidget {
   const ReportsPage({super.key});
@@ -174,7 +176,8 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
     }
   }
 
-  Future<Directory> _downloadsDir() async {
+  Future<Directory?> _downloadsDir() async {
+    if (kIsWeb) return null;
     final base = await getApplicationDocumentsDirectory();
     final dir = Directory(p.join(base.path, 'report_downloads'));
     if (!dir.existsSync()) {
@@ -184,9 +187,14 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
   }
 
   Future<void> _refreshDownloads() async {
+    if (kIsWeb) {
+      if (!mounted) return;
+      setState(() => _downloadFiles = const []);
+      return;
+    }
     try {
       final dir = await _downloadsDir();
-      final files = dir
+      final files = dir!
           .listSync()
           .whereType<File>()
           .where((f) {
@@ -514,30 +522,116 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
               ])
           .toList(),
     );
-    final folderPath = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Select folder to save all records',
-    );
-    if (folderPath == null || folderPath.isEmpty) return;
-
     final cadetName = 'all_cadets_$stamp.csv';
     final inventoryName = 'all_inventory_$stamp.csv';
     final historyName = 'all_history_$stamp.csv';
 
-    final cadetPath = p.join(folderPath, cadetName);
-    final inventoryPath = p.join(folderPath, inventoryName);
-    final historyPath = p.join(folderPath, historyName);
-    await File(cadetPath).writeAsBytes(Uint8List.fromList(utf8.encode(cadetCsv)), flush: true);
-    await File(inventoryPath).writeAsBytes(Uint8List.fromList(utf8.encode(inventoryCsv)), flush: true);
-    await File(historyPath).writeAsBytes(Uint8List.fromList(utf8.encode(historyCsv)), flush: true);
+    if (kIsWeb) {
+      await downloadFileOnWeb(cadetName, utf8.encode(cadetCsv), 'text/csv');
+      await downloadFileOnWeb(inventoryName, utf8.encode(inventoryCsv), 'text/csv');
+      await downloadFileOnWeb(historyName, utf8.encode(historyCsv), 'text/csv');
+      _toast('3 files downloaded.');
+      return;
+    }
 
+    // Write all 3 files to internal dir first (always writable)
     final appDir = await _downloadsDir();
-    await File(p.join(appDir.path, cadetName)).writeAsBytes(Uint8List.fromList(utf8.encode(cadetCsv)), flush: true);
-    await File(p.join(appDir.path, inventoryName))
-        .writeAsBytes(Uint8List.fromList(utf8.encode(inventoryCsv)), flush: true);
-    await File(p.join(appDir.path, historyName)).writeAsBytes(Uint8List.fromList(utf8.encode(historyCsv)), flush: true);
+    final cadetBytes = Uint8List.fromList(utf8.encode(cadetCsv));
+    final inventoryBytes = Uint8List.fromList(utf8.encode(inventoryCsv));
+    final historyBytes = Uint8List.fromList(utf8.encode(historyCsv));
+
+    await File(p.join(appDir!.path, cadetName)).writeAsBytes(cadetBytes, flush: true);
+    await File(p.join(appDir.path, inventoryName)).writeAsBytes(inventoryBytes, flush: true);
+    await File(p.join(appDir.path, historyName)).writeAsBytes(historyBytes, flush: true);
     await _refreshDownloads();
 
-    _toast('Saved to folder and Downloads tab.');
+    if (!mounted) return;
+
+    // Show custom bottom sheet: Save to Downloads OR Share via other apps
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Title
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text(
+                  'Export 3 files (Cadets, Inventory, History)',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+              ),
+              const Divider(),
+
+              // ── Option 1: Save to Downloads ──────────────────────
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.download_rounded, color: Colors.green),
+                ),
+                title: const Text('Save to Downloads'),
+                subtitle: const Text('Each file saved one by one'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  for (final entry in [
+                    (cadetName, cadetBytes),
+                    (inventoryName, inventoryBytes),
+                    (historyName, historyBytes),
+                  ]) {
+                    await _saveToDownloads(
+                      bytes: entry.$2,
+                      filename: entry.$1,
+                      mimeType: 'text/csv',
+                    );
+                  }
+                  if (!mounted) return;
+                  _toast('All 3 files saved to Downloads.');
+                },
+              ),
+
+              // ── Option 2: Share via other apps ────────────────────
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.share_rounded, color: Colors.blue),
+                ),
+                title: const Text('Share via other apps'),
+                subtitle: const Text('WhatsApp, Gmail, Drive and more'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await Share.shareXFiles(
+                    [
+                      XFile(p.join(appDir.path, cadetName), mimeType: 'text/csv'),
+                      XFile(p.join(appDir.path, inventoryName), mimeType: 'text/csv'),
+                      XFile(p.join(appDir.path, historyName), mimeType: 'text/csv'),
+                    ],
+                    subject: 'All Records Export',
+                    text: 'Cadets, Inventory and History CSV files',
+                  );
+                },
+              ),
+
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _exportDataPackage() async {
@@ -552,69 +646,359 @@ class _ReportsPageState extends State<ReportsPage> with SingleTickerProviderStat
   }
 
   Future<void> _importDataPackage() async {
+    // ── Step 1: Pick the .json file ────────────────────────────────────────
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['json'],
       withData: true,
     );
     if (result == null || result.files.isEmpty) return;
+
     final bytes = result.files.single.bytes;
     if (bytes == null || bytes.isEmpty) {
-      _toast('Unable to read file bytes.');
+      _toast('Unable to read file.');
       return;
     }
 
-    final decoded = jsonDecode(utf8.decode(bytes));
-    if (decoded is! Map<String, dynamic>) {
-      _toast('Invalid package format.');
+    // ── Step 2: Decode & validate ──────────────────────────────────────────
+    Map<String, dynamic> decoded;
+    try {
+      final raw = jsonDecode(utf8.decode(bytes));
+      if (raw is! Map<String, dynamic>) throw const FormatException('Not a JSON object');
+      decoded = raw;
+    } catch (_) {
+      _toast('Invalid package format — not a valid military app export.');
       return;
     }
+
+    // Validate it is actually our package (must have schema key)
+    final schema = decoded['schema'] as String?;
+    if (schema != 'military_app_package_v1') {
+      _toast('Wrong file — this is not a military app export file.');
+      return;
+    }
+
+    // ── Step 3: Show merge preview dialog ─────────────────────────────────
+    final exportedAt = decoded['exported_at'];
+    final exportedDate = exportedAt is int
+        ? DateTime.fromMillisecondsSinceEpoch(exportedAt)
+        : null;
+    final exportedLabel = exportedDate != null
+        ? '${exportedDate.day.toString().padLeft(2,'0')}/'
+          '${exportedDate.month.toString().padLeft(2,'0')}/'
+          '${exportedDate.year}  '
+          '${exportedDate.hour.toString().padLeft(2,'0')}:'
+          '${exportedDate.minute.toString().padLeft(2,'0')}'
+        : 'Unknown time';
+
+    final incomingTransfers = (decoded['transfers'] as List?)?.length ?? 0;
 
     if (!mounted) return;
-    final shouldImport = await showDialog<bool>(
+    final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Import Package'),
-        content: const Text(
-          'This will replace current cadets, inventory and history records in this device. Continue?',
+      builder: (ctx) => AlertDialog(
+        title: const Text('Merge Device Data'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // File info
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    const Icon(Icons.devices, size: 16, color: Colors.blue),
+                    const SizedBox(width: 6),
+                    Text('Exported: $exportedLabel',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text('Contains $incomingTransfers transfer records',
+                      style: const TextStyle(fontSize: 13)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            // What will happen
+            const Text('What will happen:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            _mergeInfoRow(Icons.add_circle_outline, Colors.green,
+                'New transfers from this file will be added'),
+            _mergeInfoRow(Icons.inventory_2_outlined, Colors.orange,
+                'Item stock will be adjusted for each new transfer'),
+            _mergeInfoRow(Icons.copy_outlined, Colors.grey,
+                'Duplicate records will be skipped automatically'),
+            _mergeInfoRow(Icons.shield_outlined, Colors.blue,
+                'Your existing data will NOT be deleted'),
+          ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Import')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            icon: const Icon(Icons.merge_type, size: 18),
+            label: const Text('Merge'),
+            onPressed: () => Navigator.of(ctx).pop(true),
+          ),
         ],
       ),
     );
 
-    if (shouldImport != true) return;
-    final summary = await ReportsDataService.instance.importPortableDataPackage(decoded);
+    if (confirm != true) return;
+
+    // ── Step 4: Run merge ──────────────────────────────────────────────────
     if (!mounted) return;
-    _toast(
-      'Imported successfully: ${summary.cadets} cadets, ${summary.items} items, ${summary.transfers} history rows.',
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('Merging data...'),
+          ],
+        ),
+      ),
     );
+
+    MergeResult summary;
+    try {
+      summary = await ReportsDataService.instance.mergeTransfersFromPackage(decoded);
+    } catch (e) {
+      if (mounted) Navigator.of(context).pop(); // close loading
+      _toast('Merge failed: $e');
+      return;
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).pop(); // close loading dialog
+
+    // ── Step 5: Show result ────────────────────────────────────────────────
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Merge Complete'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.check_circle, color: Colors.green, size: 48),
+            const SizedBox(height: 12),
+            _mergeInfoRow(Icons.add_circle, Colors.green,
+                '${summary.inserted} new transfers added'),
+            _mergeInfoRow(Icons.copy, Colors.grey,
+                '${summary.skipped} duplicates skipped'),
+            if (summary.failed > 0)
+              _mergeInfoRow(Icons.warning_amber, Colors.red,
+                  '${summary.failed} records could not be matched'),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+
     await _loadInitial();
   }
 
+  /// Small helper row used inside merge dialogs.
+  static Widget _mergeInfoRow(IconData icon, Color color, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 13))),
+        ],
+      ),
+    );
+  }
+
+
+  /// Saves bytes to the device Downloads folder.
+  ///
+  /// Platform behaviour:
+  ///   Web     → triggers browser download via dart:html
+  ///   Android → writes to app external files dir (accessible in Files app,
+  ///             no permission needed on Android 10+), then opens share sheet
+  ///             so user can move/forward the file
+  ///   iOS     → writes to internal docs dir, then shares via share sheet
+  ///   Desktop → uses FilePicker.saveFile() with bytes (works on desktop/web)
+  Future<void> _saveToDownloads({
+    required Uint8List bytes,
+    required String filename,
+    required String mimeType,
+  }) async {
+    if (kIsWeb) {
+      await downloadFileOnWeb(filename, bytes, mimeType);
+      _toast('Download started: $filename');
+      return;
+    }
+
+    if (Platform.isAndroid) {
+      // Write to app-scoped external storage — always writable without
+      // any permission on Android 10+.
+      // Path: /storage/emulated/0/Android/data/<pkg>/files/<filename>
+      // Accessible via the device Files app under "Android/data".
+      final extDir = await getExternalStorageDirectory();
+      if (extDir == null) {
+        // Fallback: internal storage + share
+        await _shareViaSheet(bytes: bytes, filename: filename, mimeType: mimeType);
+        return;
+      }
+      final savePath = p.join(extDir.path, filename);
+      await File(savePath).writeAsBytes(bytes, flush: true);
+      if (!mounted) return;
+      // Also offer share so user can move to WhatsApp, Drive, etc.
+      await Share.shareXFiles(
+        [XFile(savePath, mimeType: mimeType)],
+        subject: filename,
+        text: 'Saved to device. Share or move as needed.',
+      );
+      return;
+    }
+
+    if (Platform.isIOS) {
+      // iOS: write to docs dir, share sheet lets user save to Files app
+      await _shareViaSheet(bytes: bytes, filename: filename, mimeType: mimeType);
+      return;
+    }
+
+    // Desktop (Windows / macOS / Linux): saveFile with bytes works perfectly
+    final savedPath = await FilePicker.platform.saveFile(
+      dialogTitle: 'Save $filename',
+      fileName: filename,
+      bytes: bytes,
+    );
+    if (!mounted) return;
+    _toast(savedPath != null ? 'Saved to $savedPath' : 'Save cancelled.');
+  }
+
+  /// Writes bytes to internal app dir then opens the system share sheet.
+  Future<void> _shareViaSheet({
+    required Uint8List bytes,
+    required String filename,
+    required String mimeType,
+  }) async {
+    final appDir = await _downloadsDir();
+    final appPath = p.join(appDir!.path, filename);
+    await File(appPath).writeAsBytes(bytes, flush: true);
+    await Share.shareXFiles(
+      [XFile(appPath, mimeType: mimeType)],
+      subject: filename,
+    );
+  }
+
+  /// Shows a bottom sheet with "Save to Downloads" first, then "Share via apps".
   Future<void> _shareBytes({
     required Uint8List bytes,
     required String filename,
     required String mimeType,
     required String text,
   }) async {
-    final folderPath = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Select folder to save $filename',
-    );
-    if (folderPath == null || folderPath.isEmpty) return;
-    final selectedPath = p.join(folderPath, filename);
-    await File(selectedPath).writeAsBytes(bytes, flush: true);
+    if (kIsWeb) {
+      await downloadFileOnWeb(filename, bytes, mimeType);
+      _toast('Download started: $filename');
+      return;
+    }
 
+    // Save a copy to internal dir so Downloads tab always works
     final appDir = await _downloadsDir();
-    final appPath = p.join(appDir.path, filename);
+    final appPath = p.join(appDir!.path, filename);
     await File(appPath).writeAsBytes(bytes, flush: true);
     await _refreshDownloads();
 
-    final _ = mimeType;
-    final __ = text;
-    _toast('Saved to folder and Downloads tab.');
+    if (!mounted) return;
+
+    // Show custom bottom sheet: Save to Downloads OR Share via other apps
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Title
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text(
+                  filename,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const Divider(),
+
+              // ── Option 1: Save to Downloads ──────────────────────
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.download_rounded, color: Colors.green),
+                ),
+                title: const Text('Save to Downloads'),
+                subtitle: const Text('Pick a folder on your device'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _saveToDownloads(
+                    bytes: bytes,
+                    filename: filename,
+                    mimeType: mimeType,
+                  );
+                },
+              ),
+
+              // ── Option 2: Share via other apps ────────────────────
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.share_rounded, color: Colors.blue),
+                ),
+                title: const Text('Share via other apps'),
+                subtitle: const Text('WhatsApp, Gmail, Drive and more'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  // Opens Android/iOS system share sheet
+                  await Share.shareXFiles(
+                    [XFile(appPath, mimeType: mimeType)],
+                    subject: filename,
+                    text: text,
+                  );
+                },
+              ),
+
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<Uint8List> _buildPdfBytes({

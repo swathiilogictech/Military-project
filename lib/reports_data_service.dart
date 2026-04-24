@@ -301,6 +301,139 @@ class ReportsDataService {
   String packageToJson(PortableDataPackage data) {
     return const JsonEncoder.withIndent('  ').convert(data.toJson());
   }
+
+  /// Merges transfers from another device's exported JSON into this device.
+  /// 
+  /// Rules:
+  ///  - Only transfers are merged (cadets/items/batches/boxes are identical on all devices)
+  ///  - Cadets are matched by cadet_id TEXT (e.g. "24023200"), not by DB integer id
+  ///  - Duplicate detection: cadet_id + item_id + quantity + action + created_at must all match
+  ///  - items.quantity is adjusted for every new transfer inserted
+  ///  - Safe to run multiple times — duplicates are always skipped
+  Future<MergeResult> mergeTransfersFromPackage(Map<String, dynamic> jsonMap) async {
+    final db = await DatabaseService.instance.database;
+
+    // ── 1. Parse incoming data ──────────────────────────────────────────────
+    final incomingTransfers = _listFromJson(jsonMap['transfers']);
+    final incomingCadets    = _listFromJson(jsonMap['cadets']);
+
+    if (incomingTransfers.isEmpty) {
+      return const MergeResult(inserted: 0, skipped: 0, failed: 0);
+    }
+
+    // ── 2. Build incoming dbId → cadet_id TEXT map ─────────────────────────
+    // (DB integer IDs may differ across devices if new cadets were added)
+    final incomingIdToCode = <int, String>{};
+    for (final c in incomingCadets) {
+      final id   = c['id'];
+      final code = c['cadet_id'];
+      if (id is int && code is String) {
+        incomingIdToCode[id] = code;
+      }
+    }
+
+    // ── 3. Build local cadet_id TEXT → local DB id map ────────────────────
+    final localCadets = await db.query('cadets', columns: ['id', 'cadet_id']);
+    final localCodeToId = <String, int>{};
+    for (final c in localCadets) {
+      localCodeToId[c['cadet_id'] as String] = c['id'] as int;
+    }
+
+    // ── 4. Load existing transfer fingerprints for duplicate detection ──────
+    // Fingerprint = "localCadetDbId|itemId|quantity|action|createdAt"
+    final existing = await db.query(
+      'transfers',
+      columns: ['cadet_id', 'item_id', 'quantity', 'action', 'created_at'],
+    );
+    final seen = <String>{};
+    for (final t in existing) {
+      seen.add(
+        '${t['cadet_id']}|${t['item_id']}|${t['quantity']}|${t['action']}|${t['created_at']}',
+      );
+    }
+
+    // ── 5. Merge in a single transaction ───────────────────────────────────
+    int inserted = 0;
+    int skipped  = 0;
+    int failed   = 0;
+
+    await db.transaction((txn) async {
+      for (final t in incomingTransfers) {
+        // Resolve cadet
+        final incomingCadetDbId = t['cadet_id'];
+        if (incomingCadetDbId is! int) { failed++; continue; }
+
+        final cadetCode = incomingIdToCode[incomingCadetDbId];
+        if (cadetCode == null)         { failed++; continue; }
+
+        final localCadetId = localCodeToId[cadetCode];
+        if (localCadetId == null)      { failed++; continue; }
+
+        // Parse fields
+        final itemId    = t['item_id']    as int?;
+        final quantity  = t['quantity']   as int?;
+        final action    = t['action']     as String?;
+        final createdAt = t['created_at'] as int?;
+        final status    = t['status']     as String?;
+
+        if (itemId == null || quantity == null || action == null || createdAt == null) {
+          failed++;
+          continue;
+        }
+
+        // Duplicate check
+        final fp = '$localCadetId|$itemId|$quantity|$action|$createdAt';
+        if (seen.contains(fp)) { skipped++; continue; }
+        seen.add(fp); // guard against duplicates within the same import file
+
+        // Insert the transfer
+        await txn.insert('transfers', {
+          'cadet_id'  : localCadetId,
+          'item_id'   : itemId,
+          'quantity'  : quantity,
+          'action'    : action,
+          'status'    : status,
+          'created_at': createdAt,
+        });
+
+        // Adjust item quantity
+        final itemRows = await txn.query(
+          'items',
+          columns  : ['quantity'],
+          where    : 'id = ?',
+          whereArgs: [itemId],
+          limit    : 1,
+        );
+        if (itemRows.isNotEmpty) {
+          final currentQty = itemRows.first['quantity'] as int;
+          int newQty = currentQty;
+
+          if (action == 'give') {
+            // Another device gave this item — reduce master stock
+            newQty = (currentQty - quantity).clamp(0, currentQty);
+          } else if (action == 'collect' && status != 'missing') {
+            // Another device collected this item — increase master stock
+            newQty = currentQty + quantity;
+          }
+
+          if (newQty != currentQty) {
+            await txn.update(
+              'items',
+              {'quantity': newQty},
+              where    : 'id = ?',
+              whereArgs: [itemId],
+            );
+          }
+        }
+
+        inserted++;
+      }
+    });
+
+    DatabaseService.instance.notifyDataChanged();
+
+    return MergeResult(inserted: inserted, skipped: skipped, failed: failed);
+  }
 }
 
 class CadetReportRow {
@@ -403,4 +536,16 @@ class ImportResult {
   final int cadets;
   final int items;
   final int transfers;
+}
+
+class MergeResult {
+  const MergeResult({
+    required this.inserted,
+    required this.skipped,
+    required this.failed,
+  });
+
+  final int inserted;
+  final int skipped;
+  final int failed;
 }
