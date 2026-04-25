@@ -979,10 +979,25 @@ class InventoryPageState extends State<InventoryPage> {
                   const Spacer(),
                   _inventoryTabSelected
                       ? (widget.canManageInventory
-                          ? _ModeChip(
-                              label: '+Add Items',
-                              selected: true,
-                              onTap: _showInventoryActionsSheet,
+                          ? Tooltip(
+                              message: 'Inventory Actions',
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: _showInventoryActionsSheet,
+                                child: Container(
+                                  width: 44,
+                                  height: 42,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF4E9D72),
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  child: const Icon(
+                                    Icons.add,
+                                    size: 24,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
                             )
                           : const SizedBox.shrink())
                       : _collectedTabSelected
@@ -1001,10 +1016,17 @@ class InventoryPageState extends State<InventoryPage> {
               ),
               const SizedBox(height: 16),
               if (_inventoryTabSelected)
-                SizedBox(
-                  height: 68,
+                Container(
+                  height: 78,
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF2ECFA),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0x1A5B3D82)),
+                  ),
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
                     itemCount: _batches.length,
                     separatorBuilder: (_, __) => const SizedBox(width: 10),
                     itemBuilder: (context, index) {
@@ -1016,6 +1038,7 @@ class InventoryPageState extends State<InventoryPage> {
                             ? () => _showRenameBatchDialog(batch)
                             : null,
                         child: Container(
+                          alignment: Alignment.center,
                           constraints: const BoxConstraints(minWidth: 140, maxWidth: 240),
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                           decoration: BoxDecoration(
@@ -1023,14 +1046,15 @@ class InventoryPageState extends State<InventoryPage> {
                             borderRadius: BorderRadius.circular(18),
                             boxShadow: const [
                               BoxShadow(
-                                color: Color(0x1F000000),
-                                blurRadius: 12,
-                                offset: Offset(0, 5),
+                                color: Color(0x1A000000),
+                                blurRadius: 10,
+                                offset: Offset(0, 4),
                               ),
                             ],
                           ),
                           child: Text(
                             batch.name,
+                            textAlign: TextAlign.center,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -1235,63 +1259,92 @@ class _ItemCard extends StatelessWidget {
     final imageData = item.imageData;
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFE2CCFF),
-        borderRadius: BorderRadius.circular(10),
+        color: const Color(0xFFE7D8FF),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0x22FFFFFF)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 8,
+            offset: Offset(0, 4),
+          ),
+        ],
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: Center(
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: (imageData != null && imageData.isNotEmpty)
-                          ? ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.memory(
-                                base64Decode(imageData),
-                                fit: BoxFit.cover,
-                              ),
-                            )
-                          : Center(
-                              child: Icon(
-                                _iconForImageKey(item.imageKey),
-                                size: 38,
-                                color: const Color(0xFF54406B),
-                              ),
-                            ),
-                    ),
-                    if (onEdit != null)
-                      Positioned(
-                        top: 0,
-                        right: 0,
-                        child: IconButton(
-                          padding: EdgeInsets.zero,
-                          visualDensity: VisualDensity.compact,
-                          onPressed: onEdit,
-                          icon: const Icon(Icons.edit_outlined, size: 16),
-                        ),
+            Row(
+              children: [
+                if (onEdit != null)
+                  Material(
+                    color: Colors.white.withOpacity(0.88),
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: onEdit,
+                      child: const Padding(
+                        padding: EdgeInsets.all(6),
+                        child: Icon(Icons.edit_outlined, size: 14, color: Color(0xFF3E2E4E)),
                       ),
-                  ],
+                    ),
+                  )
+                else
+                  const SizedBox(width: 26, height: 26),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(999),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x1A000000),
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    'x ${item.quantity}',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF352747),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
+            Expanded(
+              child: (imageData != null && imageData.isNotEmpty)
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.memory(
+                        base64Decode(imageData),
+                        fit: BoxFit.cover,
+                      ),
+                    )
+                  : Center(
+                      child: Icon(
+                        _iconForImageKey(item.imageKey),
+                        size: 40,
+                        color: const Color(0xFF54406B),
+                      ),
+                    ),
+            ),
+            const SizedBox(height: 10),
             Text(
               item.name,
+              textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 4),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                'x ${item.quantity}',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF2F2140),
               ),
             ),
           ],
