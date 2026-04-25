@@ -63,11 +63,11 @@ class _CollectPageState extends State<CollectPage> {
   Future<void> _loadRecentGivenCadets() async {
     setState(() => _recentCadetsLoading = true);
     final rows = await DatabaseService.instance.getCadetHistorySummaries(
-      action: 'give',
+      action: 'all',
       limit: 500,
     );
     if (!mounted) return;
-    final filtered = rows.where((r) => r.totalGiven > 0).toList();
+    final filtered = rows.where((r) => r.totalGiven > r.totalCollected).toList();
     filtered.sort((a, b) => b.lastActivityMillis.compareTo(a.lastActivityMillis));
     setState(() {
       _recentGivenCadets = filtered;
